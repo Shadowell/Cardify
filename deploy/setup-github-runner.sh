@@ -2,7 +2,7 @@
 set -euo pipefail
 
 RUNNER_USER="${CARDIFY_RUNNER_USER:-cardify-runner}"
-RUNNER_DIR="${CARDIFY_RUNNER_DIR:-/opt/cardify-runner}"
+RUNNER_DIR="${CARDIFY_RUNNER_DIR:-/opt/actions-runner/Cardify}"
 RUNNER_REPOSITORY="${GITHUB_RUNNER_REPOSITORY:-Shadowell/Cardify}"
 RUNNER_NAME="${GITHUB_RUNNER_NAME:-cardify-production}"
 RUNNER_LABEL="${GITHUB_RUNNER_LABEL:-cardify-production}"

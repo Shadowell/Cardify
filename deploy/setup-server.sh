@@ -4,7 +4,7 @@ set -euo pipefail
 APP_DIR="${1:-/opt/cardify}"
 APP_USER="${CARDIFY_APP_USER:-cardify}"
 RUNNER_USER="${CARDIFY_RUNNER_USER:-cardify-runner}"
-RUNNER_DIR="${CARDIFY_RUNNER_DIR:-/opt/cardify-runner}"
+RUNNER_DIR="${CARDIFY_RUNNER_DIR:-/opt/actions-runner/Cardify}"
 SERVICE_NAME="${CARDIFY_SERVICE_NAME:-cardify-backend}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
