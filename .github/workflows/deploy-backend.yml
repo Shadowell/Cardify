@@ -3,11 +3,19 @@ name: Deploy Cardify Backend
 on:
   push:
     branches: [main]
+  schedule:
+    - cron: '2/5 * * * *'
   workflow_dispatch:
+    inputs:
+      force_deploy:
+        description: Deploy even when this commit is already active
+        required: false
+        default: false
+        type: boolean
 
 concurrency:
-  group: cardify-backend-production
-  cancel-in-progress: true
+  group: cardify-production-deploy
+  cancel-in-progress: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
 
 permissions:
   contents: read
@@ -17,6 +25,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
@@ -31,43 +41,27 @@ jobs:
 
   deploy:
     needs: test
-    if: ${{ vars.CARDIFY_DEPLOY_ENABLED == 'true' }}
-    runs-on: ubuntu-latest
-    env:
-      SERVER_HOST: ${{ secrets.SERVER_HOST }}
-      SERVER_USER: ${{ secrets.SERVER_USER }}
-      CARDIFY_APP_DIR: ${{ vars.CARDIFY_APP_DIR || '/opt/cardify' }}
+    if: ${{ needs.test.result == 'success' && vars.CARDIFY_DEPLOY_ENABLED == 'true' && github.ref == 'refs/heads/main' }}
+    runs-on: [self-hosted, cardify-production]
+    environment: production
     steps:
+      - name: Verify production ref
+        run: test "${GITHUB_REF}" = 'refs/heads/main'
       - uses: actions/checkout@v7
-      - name: Configure SSH
+        with:
+          ref: ${{ github.sha }}
+      - name: Check deployed revision
+        id: deployment-gate
         env:
-          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          FORCE_DEPLOY: ${{ inputs.force_deploy || 'false' }}
         run: |
-          test -n "${SERVER_HOST}"
-          test -n "${SERVER_USER}"
-          test -n "${SSH_PRIVATE_KEY}"
-          install -d -m 700 ~/.ssh
-          printf '%s\n' "${SSH_PRIVATE_KEY}" > ~/.ssh/id_ed25519
-          chmod 600 ~/.ssh/id_ed25519
-          ssh-keyscan -T 30 -H "${SERVER_HOST}" >> ~/.ssh/known_hosts
-          chmod 600 ~/.ssh/known_hosts
-      - name: Sync backend and deployment files
-        run: |
-          SSH_OPTS="-i ~/.ssh/id_ed25519 -o ConnectTimeout=30 -o ServerAliveInterval=15 -o ServerAliveCountMax=3"
-          ssh ${SSH_OPTS} "${SERVER_USER}@${SERVER_HOST}" "mkdir -p '${CARDIFY_APP_DIR}/backend' '${CARDIFY_APP_DIR}/deploy' '${CARDIFY_APP_DIR}/storage'"
-          rsync -az --delete -e "ssh ${SSH_OPTS}" \
-            --exclude='.env' \
-            --exclude='.venv/' \
-            --exclude='__pycache__/' \
-            --exclude='*.pyc' \
-            --exclude='storage/' \
-            backend/ "${SERVER_USER}@${SERVER_HOST}:${CARDIFY_APP_DIR}/backend/"
-          rsync -az --delete -e "ssh ${SSH_OPTS}" deploy/ "${SERVER_USER}@${SERVER_HOST}:${CARDIFY_APP_DIR}/deploy/"
-      - name: Deploy and verify health
-        run: |
-          SSH_OPTS="-i ~/.ssh/id_ed25519 -o ConnectTimeout=30 -o ServerAliveInterval=15 -o ServerAliveCountMax=3"
-          ssh ${SSH_OPTS} "${SERVER_USER}@${SERVER_HOST}" "CARDIFY_APP_DIR='${CARDIFY_APP_DIR}' bash '${CARDIFY_APP_DIR}/deploy/backend-deploy.sh'"
-      - name: Record deployed revision
-        run: |
-          SSH_OPTS="-i ~/.ssh/id_ed25519 -o ConnectTimeout=30 -o ServerAliveInterval=15 -o ServerAliveCountMax=3"
-          ssh ${SSH_OPTS} "${SERVER_USER}@${SERVER_HOST}" "printf '%s\n' '${GITHUB_SHA}' > '${CARDIFY_APP_DIR}/deploy/last_deployed_sha'"
+          deployed_sha="$(cat /opt/cardify/deploy/last_deployed_sha 2>/dev/null || true)"
+          if [[ "${GITHUB_SHA}" == "${deployed_sha}" && "${FORCE_DEPLOY}" != 'true' ]]; then
+            echo 'should_deploy=false' >> "${GITHUB_OUTPUT}"
+            echo "${GITHUB_SHA} is already active."
+          else
+            echo 'should_deploy=true' >> "${GITHUB_OUTPUT}"
+          fi
+      - name: Deploy backend
+        if: steps.deployment-gate.outputs.should_deploy == 'true'
+        run: sudo /usr/local/sbin/cardify-deploy "${GITHUB_WORKSPACE}" "${GITHUB_SHA}"

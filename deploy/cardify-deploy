@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SOURCE_DIR="${1:?Expected the GitHub Actions workspace path}"
+DEPLOY_SHA="${2:?Expected the GitHub commit SHA}"
+WORK_ROOT="/opt/cardify-runner/_work"
+APP_DIR="/opt/cardify"
+SOURCE_DIR="$(readlink -f "${SOURCE_DIR}")"
+case "${SOURCE_DIR}" in
+  "${WORK_ROOT}"/*) ;;
+  *)
+    echo "Deployment source must be inside ${WORK_ROOT}."
+    exit 1
+    ;;
+esac
+
+if [[ ! -f "${SOURCE_DIR}/deploy/backend-deploy.sh" || ! -f "${SOURCE_DIR}/backend/pyproject.toml" ]]; then
+  echo "Deployment source is missing required Cardify files."
+  exit 1
+fi
+
+export CARDIFY_APP_DIR="${APP_DIR}"
+export CARDIFY_SOURCE_DIR="${SOURCE_DIR}"
+export CARDIFY_DEPLOY_SHA="${DEPLOY_SHA}"
+
+exec /bin/bash "${SOURCE_DIR}/deploy/backend-deploy.sh"
