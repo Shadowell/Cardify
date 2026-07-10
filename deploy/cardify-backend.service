@@ -1,0 +1,20 @@
+[Unit]
+Description=Cardify FastAPI backend
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=cardify
+Group=cardify
+WorkingDirectory=__CARDIFY_APP_DIR__/backend
+EnvironmentFile=__CARDIFY_APP_DIR__/backend/.env
+Environment=PYTHONUNBUFFERED=1
+ExecStart=__CARDIFY_APP_DIR__/backend/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
