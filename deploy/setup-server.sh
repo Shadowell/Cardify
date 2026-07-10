@@ -4,6 +4,7 @@ set -euo pipefail
 APP_DIR="${1:-/opt/cardify}"
 APP_USER="${CARDIFY_APP_USER:-cardify}"
 RUNNER_USER="${CARDIFY_RUNNER_USER:-cardify-runner}"
+RUNNER_DIR="${CARDIFY_RUNNER_DIR:-/opt/cardify-runner}"
 SERVICE_NAME="${CARDIFY_SERVICE_NAME:-cardify-backend}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -20,14 +21,16 @@ if ! id -u "${APP_USER}" >/dev/null 2>&1; then
 fi
 
 if ! id -u "${RUNNER_USER}" >/dev/null 2>&1; then
-  useradd --create-home --home-dir /opt/cardify-runner --shell /bin/bash "${RUNNER_USER}"
+  useradd --create-home --home-dir "${RUNNER_DIR}" --shell /bin/bash "${RUNNER_USER}"
 fi
 
 install -d -o "${APP_USER}" -g "${APP_USER}" "${APP_DIR}" "${APP_DIR}/backend" "${APP_DIR}/storage"
 install -d -o root -g root -m 755 "${APP_DIR}/deploy"
-install -d -o "${RUNNER_USER}" -g "${RUNNER_USER}" /opt/cardify-runner
+install -d -o "${RUNNER_USER}" -g "${RUNNER_USER}" "${RUNNER_DIR}"
 
 install -o root -g "${RUNNER_USER}" -m 750 "${SCRIPT_DIR}/cardify-deploy" /usr/local/sbin/cardify-deploy
+printf 'CARDIFY_APP_DIR=%q\nCARDIFY_RUNNER_DIR=%q\n' "${APP_DIR}" "${RUNNER_DIR}" > /etc/cardify-deploy.env
+chmod 644 /etc/cardify-deploy.env
 printf '%s\n' "${RUNNER_USER} ALL=(root) NOPASSWD: /usr/local/sbin/cardify-deploy" > /etc/sudoers.d/cardify-runner
 chmod 440 /etc/sudoers.d/cardify-runner
 visudo -cf /etc/sudoers.d/cardify-runner
