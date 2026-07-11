@@ -34,7 +34,6 @@ rm -f "/tmp/${runner_archive}"
 
 "${RUNNER_DIR}/bin/installdependencies.sh"
 runuser -u "${RUNNER_USER}" -- bash -c "cd '${RUNNER_DIR}' && ./config.sh --unattended --url 'https://github.com/${RUNNER_REPOSITORY}' --token '${RUNNER_TOKEN}' --name '${RUNNER_NAME}' --labels '${RUNNER_LABEL}' --work _work --replace"
-"${RUNNER_DIR}/svc.sh" install "${RUNNER_USER}"
-"${RUNNER_DIR}/svc.sh" start
+(cd "${RUNNER_DIR}" && ./svc.sh install "${RUNNER_USER}" && ./svc.sh start)
 
 echo "Runner ${RUNNER_NAME} is registered with label ${RUNNER_LABEL}."
