@@ -35,9 +35,6 @@ public final class CardifyViewModel: ObservableObject {
         defer { isLoading = false }
         do {
             templates = try await apiClient.listTemplates()
-            if selectedTemplate == nil, let first = templates.first {
-                selectTemplate(first)
-            }
         } catch {
             errorMessage = error.localizedDescription
         }

@@ -6,8 +6,22 @@ def test_templates_are_seeded(client):
     response = client.get("/templates")
     assert response.status_code == 200
     items = response.json()["items"]
-    assert len(items) >= 6
-    assert {"知识卡", "育儿", "营销", "视频卡", "旅行", "探店", "分享卡"}.issubset({item["category"] for item in items})
+    assert len(items) == 20
+    assert len({item["id"] for item in items}) == 20
+    assert {"知识卡", "育儿", "营销", "视频卡", "旅行", "探店", "分享卡", "生活"}.issubset(
+        {item["category"] for item in items}
+    )
+
+    for item in items:
+        schema = item["schema"]
+        assert schema["default_canvas_size_id"] in {size["id"] for size in schema["canvas_sizes"]}
+        assert any(layer["role"] == "title" for layer in schema["layers"])
+        assert any(layer["role"] == "decorative_pattern" for layer in schema["layers"])
+        assert schema["tokens"]["palette"]["paper"].startswith("#")
+        for layer in schema["layers"]:
+            frame = layer["frame"]
+            assert frame["x"] + frame["width"] <= 1
+            assert frame["y"] + frame["height"] <= 1
 
     detail = client.get(f"/templates/{items[0]['id']}")
     assert detail.status_code == 200

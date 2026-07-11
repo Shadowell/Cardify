@@ -30,26 +30,39 @@ struct CardifyApp: App {
 
 private struct RootView: View {
     @EnvironmentObject private var viewModel: CardifyViewModel
-    @State private var selectedTab: AppTab = .home
+    @State private var selectedTab: AppTab = .creation
+    @State private var creationMode: CreationMode = .input
 
     var body: some View {
         TabView(selection: $selectedTab) {
-            HomeView {
-                selectedTab = .editor
-            }
-                .tabItem { Label("首页", systemImage: "house") }
-                .tag(AppTab.home)
+            CreationFlowView(mode: $creationMode)
+                .tabItem {
+                    Label("创作", systemImage: "wand.and.sparkles")
+                }
+                .tag(AppTab.creation)
             TemplateListView()
-                .tabItem { Label("模板", systemImage: "square.grid.2x2") }
+                .tabItem {
+                    Label("模板库", systemImage: "square.grid.2x2")
+                }
                 .tag(AppTab.templates)
-            EditorView()
-                .tabItem { Label("编辑", systemImage: "paintbrush") }
-                .tag(AppTab.editor)
-            ProfileView {
-                selectedTab = .editor
+            WorksView {
+                creationMode = .editing
+                selectedTab = .creation
             }
-                .tabItem { Label("我的", systemImage: "person.crop.circle") }
+                .tabItem {
+                    Label("作品", systemImage: "rectangle.stack")
+                }
+                .tag(AppTab.works)
+            ProfileView()
+                .tabItem {
+                    Label("我的", systemImage: "person.crop.circle")
+                }
                 .tag(AppTab.profile)
+        }
+        .tint(Color(red: 0.12, green: 0.60, blue: 0.45))
+        .toolbar(.hidden, for: .tabBar)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            CardifyTabBar(selection: $selectedTab)
         }
         .task {
             await viewModel.loadTemplates()
@@ -58,11 +71,103 @@ private struct RootView: View {
     }
 }
 
-private enum AppTab: Hashable {
-    case home
+private enum AppTab: Hashable, CaseIterable, Identifiable {
+    case creation
     case templates
-    case editor
+    case works
     case profile
+
+    var id: Self { self }
+
+    var title: String {
+        switch self {
+        case .creation: return "创作"
+        case .templates: return "模板库"
+        case .works: return "作品"
+        case .profile: return "我的"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .creation: return "wand.and.sparkles"
+        case .templates: return "square.grid.2x2"
+        case .works: return "rectangle.stack"
+        case .profile: return "person.crop.circle"
+        }
+    }
+
+    var selectedIcon: String {
+        switch self {
+        case .creation: return "wand.and.sparkles"
+        case .templates: return "square.grid.2x2.fill"
+        case .works: return "rectangle.stack.fill"
+        case .profile: return "person.crop.circle.fill"
+        }
+    }
+
+}
+
+private enum CreationMode {
+    case input
+    case editing
+}
+
+private struct CreationFlowView: View {
+    @Binding var mode: CreationMode
+
+    var body: some View {
+        switch mode {
+        case .input:
+            HomeView {
+                mode = .editing
+            }
+        case .editing:
+            EditorView {
+                mode = .input
+            }
+        }
+    }
+}
+
+private struct CardifyTabBar: View {
+    @Binding var selection: AppTab
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(AppTab.allCases) { tab in
+                let isSelected = selection == tab
+                Button {
+                    withAnimation(.easeOut(duration: 0.16)) {
+                        selection = tab
+                    }
+                } label: {
+                    VStack(spacing: 4) {
+                        Image(systemName: isSelected ? tab.selectedIcon : tab.icon)
+                            .font(.system(size: 20, weight: .semibold))
+                            .frame(width: 24, height: 24)
+                        Text(tab.title)
+                            .font(.caption2.weight(.medium))
+                    }
+                    .foregroundStyle(isSelected ? Color.cardifyNavActive : Color.cardifyNavInactive)
+                    .frame(maxWidth: .infinity, minHeight: 54)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(tab.title)
+                .accessibilityAddTraits(isSelected ? .isSelected : [])
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.top, 5)
+        .padding(.bottom, 3)
+        .background(.ultraThinMaterial)
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(Color.cardifyInk.opacity(0.07))
+                .frame(height: 0.5)
+        }
+    }
 }
 
 private struct HomeView: View {
@@ -72,7 +177,7 @@ private struct HomeView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 18) {
+                VStack(spacing: 20) {
                     ZStack(alignment: .topLeading) {
                         TextEditor(text: $viewModel.inputText)
                             .frame(height: 120)
@@ -93,6 +198,8 @@ private struct HomeView: View {
                             .stroke(Color.cardifyMint, lineWidth: 1)
                     )
 
+                    HomeTemplatePicker()
+
                     Button {
                         viewModel.useSampleInput()
                     } label: {
@@ -110,12 +217,12 @@ private struct HomeView: View {
                             }
                         }
                     } label: {
-                        Label(viewModel.isLoading ? "生成中" : "生成魔卡", systemImage: "sparkles")
+                        Label(generationButtonTitle, systemImage: "sparkles")
                             .frame(maxWidth: .infinity)
                             .frame(height: 48)
                     }
                     .buttonStyle(.borderedProminent)
-                    .disabled(viewModel.isLoading)
+                    .disabled(viewModel.isLoading || !canGenerate)
 
                     if let message = viewModel.errorMessage {
                         Text(message)
@@ -125,16 +232,129 @@ private struct HomeView: View {
                 }
                 .padding()
             }
-            .safeAreaPadding(.bottom, 88)
-            .navigationTitle("Cardify")
+            .navigationTitle("创作")
             .cardifyInlineNavigationTitle()
         }
+    }
+
+    private var canGenerate: Bool {
+        !viewModel.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && viewModel.selectedTemplate != nil
+    }
+
+    private var generationButtonTitle: String {
+        if viewModel.isLoading {
+            return "生成中"
+        }
+        if viewModel.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "先输入文字"
+        }
+        if viewModel.selectedTemplate == nil {
+            return "选择模板后生成"
+        }
+        return "生成魔卡"
+    }
+}
+
+private struct HomeTemplatePicker: View {
+    @EnvironmentObject private var viewModel: CardifyViewModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Text("选择模板")
+                    .font(.headline)
+                    .foregroundStyle(Color.cardifyInk)
+                Text(viewModel.selectedTemplate == nil ? "请选择一张版式" : "已选择")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+            }
+
+            if viewModel.isLoading && viewModel.templates.isEmpty {
+                HStack(spacing: 8) {
+                    ProgressView()
+                    Text("正在加载模板")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, minHeight: 96)
+            } else if viewModel.templates.isEmpty {
+                Button {
+                    Task { await viewModel.loadTemplates() }
+                } label: {
+                    Label("重新加载模板", systemImage: "arrow.clockwise")
+                        .frame(maxWidth: .infinity, minHeight: 96)
+                }
+                .buttonStyle(.bordered)
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    LazyHStack(spacing: 10) {
+                        ForEach(viewModel.templates) { template in
+                            TemplateSelectionCard(
+                                template: template,
+                                isSelected: viewModel.selectedTemplate?.id == template.id
+                            ) {
+                                viewModel.selectTemplate(template)
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 1)
+                    .padding(.vertical, 2)
+                }
+            }
+        }
+    }
+}
+
+private struct TemplateSelectionCard: View {
+    let template: TemplateSummary
+    let isSelected: Bool
+    let onSelect: () -> Void
+
+    var body: some View {
+        Button(action: onSelect) {
+            VStack(alignment: .leading, spacing: 7) {
+                ZStack(alignment: .topTrailing) {
+                    TemplateThumbnail(template: template)
+                        .frame(width: 78, height: 102)
+
+                    if isSelected {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.body)
+                            .foregroundStyle(Color.cardifyNavActive)
+                            .padding(5)
+                            .background(.white, in: Circle())
+                            .padding(4)
+                    }
+                }
+
+                Text(template.name)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Color.cardifyInk)
+                    .lineLimit(2)
+                    .frame(width: 88, alignment: .leading)
+            }
+            .padding(6)
+            .background(
+                Color.cardifyPaper,
+                in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(isSelected ? Color.cardifyNavActive : Color.cardifyMint, lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(template.name)
+        .accessibilityValue(isSelected ? "已选中" : "未选中")
+        .accessibilityHint("选择此模板用于生成魔卡")
     }
 }
 
 private struct TemplateListView: View {
     @EnvironmentObject private var viewModel: CardifyViewModel
     @State private var selectedCategory = "全部"
+    @State private var previewTemplate: TemplateSummary?
 
     private var categories: [String] {
         ["全部"] + Array(Set(viewModel.templates.map(\.category))).sorted()
@@ -157,8 +377,7 @@ private struct TemplateListView: View {
                                 selectedCategory = category
                             }
                             .buttonStyle(.bordered)
-                            .buttonBorderShape(.capsule)
-                            .tint(selectedCategory == category ? .cardifyInk : .cardifyMuted)
+                            .tint(selectedCategory == category ? Color.cardifyNavActive : Color.cardifyMuted)
                         }
                     }
                     .padding(.horizontal)
@@ -167,7 +386,7 @@ private struct TemplateListView: View {
 
                 List(visibleTemplates) { template in
                     Button {
-                        viewModel.selectTemplate(template)
+                        previewTemplate = template
                     } label: {
                         HStack(spacing: 14) {
                             TemplateThumbnail(template: template)
@@ -185,18 +404,68 @@ private struct TemplateListView: View {
                                     .lineLimit(1)
                             }
                             Spacer()
-                            if viewModel.selectedTemplate?.id == template.id {
-                                Image(systemName: "checkmark.circle.fill")
-                                    .foregroundStyle(.green)
-                            }
+                            Image(systemName: "eye")
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(Color.cardifyNavActive)
                         }
                     }
-                    .listRowSeparator(.hidden)
-                    .listRowBackground(Color.clear)
+                    .accessibilityHint("预览此模板")
                 }
                 .listStyle(.plain)
             }
-            .navigationTitle("模板")
+            .navigationTitle("模板库")
+            .sheet(item: $previewTemplate) { template in
+                TemplatePreviewSheet(template: template)
+            }
+        }
+    }
+}
+
+private struct TemplatePreviewSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let template: TemplateSummary
+
+    private var sampleContent: CardContent {
+        CardContent(
+            title: template.name,
+            summary: "为内容留出清晰重点，让信息更容易阅读和分享。",
+            tags: ["#Cardify", "#内容创作"],
+            authorName: "Cardify",
+            theme: .mint
+        )
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    TemplateCanvasView(
+                        template: template.schema,
+                        content: sampleContent,
+                        canvasSizeId: template.defaultSizeId
+                    )
+                    .frame(maxWidth: .infinity)
+                    .shadow(color: .black.opacity(0.1), radius: 14, y: 8)
+
+                    HStack {
+                        Label(template.category, systemImage: "tag")
+                        Spacer()
+                        Text("\(template.schema.defaultCanvasSize.label) · \(template.schema.defaultCanvasSize.ratioLabel)")
+                    }
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                }
+                .padding()
+            }
+            .navigationTitle(template.name)
+            .cardifyInlineNavigationTitle()
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("完成") {
+                        dismiss()
+                    }
+                }
+            }
         }
     }
 }
@@ -210,17 +479,8 @@ private struct TemplateThumbnail: View {
             summary: "为内容留出清晰重点",
             tags: ["#Cardify"],
             authorName: "Cardify",
-            theme: theme
+            theme: .mint
         )
-    }
-
-    private var theme: CardTheme {
-        switch template.category {
-        case "营销", "探店": return .gold
-        case "旅行", "视频卡": return .sky
-        case "分享卡": return .blush
-        default: return .mint
-        }
     }
 
     var body: some View {
@@ -237,6 +497,8 @@ private struct TemplateThumbnail: View {
 
 private struct EditorView: View {
     @EnvironmentObject private var viewModel: CardifyViewModel
+    let onBackToInput: () -> Void
+    @State private var isCanvasSizePickerPresented = false
     #if canImport(PhotosUI)
     @State private var selectedCoverPhoto: PhotosPickerItem?
     @State private var selectedAvatarPhoto: PhotosPickerItem?
@@ -261,32 +523,101 @@ private struct EditorView: View {
                         .padding()
                         .shadow(color: .black.opacity(0.12), radius: 18, y: 12)
 
-                    VStack(alignment: .leading, spacing: 14) {
-                        Picker("画布尺寸", selection: $viewModel.selectedCanvasSizeId) {
-                            ForEach(template.schema.canvasSizes) { size in
-                                Text("\(size.label) \(size.ratioLabel)").tag(size.id)
+                    VStack(alignment: .leading, spacing: 20) {
+                        Button {
+                            isCanvasSizePickerPresented = true
+                        } label: {
+                            HStack(spacing: 12) {
+                                Image(systemName: "aspectratio")
+                                    .font(.system(size: 17, weight: .medium))
+                                    .foregroundStyle(Color.cardifyNavActive)
+
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("画布尺寸")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                    Text(selectedCanvasSize(for: template).label)
+                                        .font(.subheadline.weight(.medium))
+                                        .foregroundStyle(Color.cardifyInk)
+                                }
+
+                                Spacer()
+
+                                Text(selectedCanvasSize(for: template).ratioLabel)
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(Color.cardifyNavActive)
+                                Image(systemName: "chevron.down")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(.horizontal, 12)
+                            .frame(minHeight: 52)
+                            .background(
+                                Color.cardifyInk.opacity(0.035),
+                                in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .stroke(Color.cardifyInk.opacity(0.08), lineWidth: 1)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("画布尺寸")
+                        .accessibilityValue(
+                            "\(selectedCanvasSize(for: template).label) \(selectedCanvasSize(for: template).ratioLabel)"
+                        )
+                        .popover(
+                            isPresented: $isCanvasSizePickerPresented,
+                            attachmentAnchor: .rect(.bounds),
+                            arrowEdge: .top
+                        ) {
+                            CanvasSizeQuickPicker(
+                                canvasSizes: template.schema.canvasSizes,
+                                selectedSizeId: $viewModel.selectedCanvasSizeId
+                            ) {
+                                isCanvasSizePickerPresented = false
+                            }
+                            .presentationCompactAdaptation(.popover)
+                        }
+
+                        VStack(alignment: .leading, spacing: 14) {
+                            Text("内容")
+                                .font(.headline.weight(.semibold))
+                                .foregroundStyle(Color.cardifyInk)
+
+                            VStack(alignment: .leading, spacing: 7) {
+                                EditorFieldLabel("标题")
+                                TextField("输入卡片标题", text: $viewModel.generatedContent.title, axis: .vertical)
+                                    .lineLimit(1...3)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 10)
+                                    .cardifyEditorFieldSurface()
+                            }
+
+                            VStack(alignment: .leading, spacing: 7) {
+                                EditorFieldLabel("正文")
+                                TextEditor(text: $viewModel.generatedContent.summary)
+                                    .font(.body)
+                                    .frame(height: 104)
+                                    .padding(8)
+                                    .scrollContentBackground(.hidden)
+                                    .cardifyEditorFieldSurface()
+                                    .accessibilityLabel("正文")
+                            }
+
+                            VStack(alignment: .leading, spacing: 7) {
+                                EditorFieldLabel("标签")
+                                TextField("使用空格分隔标签", text: tagsBinding)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 10)
+                                    .cardifyEditorFieldSurface()
                             }
                         }
-                        .pickerStyle(.menu)
 
-                        TextField("标题", text: $viewModel.generatedContent.title, axis: .vertical)
-                            .textFieldStyle(.roundedBorder)
-                            .lineLimit(1...3)
+                        Divider()
+                            .overlay(Color.cardifyInk.opacity(0.08))
 
-                        TextEditor(text: $viewModel.generatedContent.summary)
-                            .frame(height: 92)
-                            .padding(8)
-                            .scrollContentBackground(.hidden)
-                            .background(Color.cardifyPaper, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                    .stroke(Color.cardifyMint, lineWidth: 1)
-                            )
-
-                        TextField("标签", text: tagsBinding)
-                            .textFieldStyle(.roundedBorder)
-
-                        DisclosureGroup("卡片素材") {
+                        DisclosureGroup {
                             VStack(alignment: .leading, spacing: 14) {
                                 #if canImport(PhotosUI)
                                 HStack(spacing: 12) {
@@ -316,8 +647,13 @@ private struct EditorView: View {
                                 }
                                 #endif
 
-                                TextField("作者昵称", text: $viewModel.generatedContent.authorName)
-                                    .textFieldStyle(.roundedBorder)
+                                VStack(alignment: .leading, spacing: 7) {
+                                    EditorFieldLabel("作者昵称")
+                                    TextField("输入作者昵称", text: $viewModel.generatedContent.authorName)
+                                        .padding(.horizontal, 12)
+                                        .padding(.vertical, 10)
+                                        .cardifyEditorFieldSurface()
+                                }
 
                                 VStack(alignment: .leading, spacing: 8) {
                                     Text("色系")
@@ -352,6 +688,10 @@ private struct EditorView: View {
                                 }
                             }
                             .padding(.top, 10)
+                        } label: {
+                            Label("素材与数据", systemImage: "slider.horizontal.3")
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(Color.cardifyInk)
                         }
                     }
                     .padding(.horizontal)
@@ -435,8 +775,17 @@ private struct EditorView: View {
                     ContentUnavailableView("暂无模板", systemImage: "square.grid.2x2", description: Text("启动后会从后端拉取模板"))
                 }
             }
-            .navigationTitle("编辑")
+            .navigationTitle("预览与编辑")
             .cardifyInlineNavigationTitle()
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        onBackToInput()
+                    } label: {
+                        Label("返回创作", systemImage: "chevron.left")
+                    }
+                }
+            }
         }
     }
 
@@ -456,6 +805,12 @@ private struct EditorView: View {
         } set: { value in
             viewModel.generatedContent.metrics[key] = Int(value) ?? 0
         }
+    }
+
+    private func selectedCanvasSize(for template: TemplateSummary) -> CanvasSize {
+        template.schema.canvasSizes
+            .first(where: { $0.id == viewModel.selectedCanvasSizeId })
+            ?? template.schema.defaultCanvasSize
     }
 
     #if canImport(PhotosUI)
@@ -505,19 +860,91 @@ private struct EditorView: View {
     #endif
 }
 
+private struct EditorFieldLabel: View {
+    let title: String
+
+    init(_ title: String) {
+        self.title = title
+    }
+
+    var body: some View {
+        Text(title)
+            .font(.subheadline.weight(.medium))
+            .foregroundStyle(Color.cardifyMuted)
+    }
+}
+
+private struct CanvasSizeQuickPicker: View {
+    let canvasSizes: [CanvasSize]
+    @Binding var selectedSizeId: String
+    let onSelection: () -> Void
+
+    private let columns = [
+        GridItem(.flexible(), spacing: 8),
+        GridItem(.flexible(), spacing: 8),
+    ]
+
+    var body: some View {
+        LazyVGrid(columns: columns, spacing: 8) {
+            ForEach(canvasSizes) { size in
+                Button {
+                    selectedSizeId = size.id
+                    onSelection()
+                } label: {
+                    HStack(spacing: 8) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(size.ratioLabel)
+                                .font(.headline.weight(.semibold))
+                            Text(size.label)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                        Spacer(minLength: 0)
+                        if selectedSizeId == size.id {
+                            Image(systemName: "checkmark")
+                                .font(.caption.weight(.bold))
+                                .foregroundStyle(Color.cardifyInk)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
+                    .padding(.horizontal, 10)
+                    .background(
+                        selectedSizeId == size.id ? Color.cardifyMint : Color.cardifyPaper,
+                        in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .stroke(selectedSizeId == size.id ? Color.cardifyInk.opacity(0.18) : Color.cardifyMint, lineWidth: 1)
+                    )
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("\(size.label) \(size.ratioLabel)")
+                .accessibilityValue(selectedSizeId == size.id ? "已选中" : "未选中")
+                .accessibilityHint("点按后立即应用画布比例")
+            }
+        }
+        .padding(12)
+        .frame(width: 320)
+        .background(Color.cardifyPaper)
+    }
+}
+
 private struct MetricField: View {
     let label: String
     @Binding var value: String
 
     var body: some View {
-        HStack(spacing: 4) {
+        VStack(alignment: .leading, spacing: 6) {
             Text(label)
                 .font(.caption)
                 .foregroundStyle(.secondary)
             TextField("0", text: $value)
                 .cardifyNumericKeyboard()
-                .textFieldStyle(.roundedBorder)
                 .multilineTextAlignment(.center)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 8)
+                .cardifyEditorFieldSurface()
         }
     }
 }
@@ -570,42 +997,62 @@ private struct SystemShareSheet: UIViewControllerRepresentable {
 }
 #endif
 
-private struct ProfileView: View {
+private struct WorksView: View {
     @EnvironmentObject private var viewModel: CardifyViewModel
     let onOpenWork: () -> Void
 
     var body: some View {
         NavigationStack {
             List {
-                Section("我的作品") {
-                    if viewModel.works.isEmpty {
-                        ContentUnavailableView(
-                            "还没有作品",
-                            systemImage: "rectangle.stack.badge.plus",
-                            description: Text("生成并保存一张卡片后，它会出现在这里")
-                        )
-                        .listRowBackground(Color.clear)
-                    } else {
-                        ForEach(viewModel.works) { work in
-                            Button {
-                                if viewModel.reopenWork(work) {
-                                    onOpenWork()
-                                }
-                            } label: {
-                                WorkRow(work: work, template: viewModel.templates.first(where: { $0.id == work.templateId }))
+                if viewModel.works.isEmpty {
+                    ContentUnavailableView(
+                        "还没有作品",
+                        systemImage: "rectangle.stack.badge.plus",
+                        description: Text("完成并保存一张魔卡后，它会出现在这里")
+                    )
+                    .listRowBackground(Color.clear)
+                } else {
+                    ForEach(viewModel.works) { work in
+                        Button {
+                            if viewModel.reopenWork(work) {
+                                onOpenWork()
                             }
-                            .buttonStyle(.plain)
-                            .swipeActions {
-                                Button(role: .destructive) {
-                                    Task { await viewModel.deleteWork(work) }
-                                } label: {
-                                    Label("删除", systemImage: "trash")
-                                }
+                        } label: {
+                            WorkRow(work: work, template: viewModel.templates.first(where: { $0.id == work.templateId }))
+                        }
+                        .buttonStyle(.plain)
+                        .swipeActions {
+                            Button(role: .destructive) {
+                                Task { await viewModel.deleteWork(work) }
+                            } label: {
+                                Label("删除", systemImage: "trash")
                             }
                         }
                     }
                 }
+            }
+            .navigationTitle("作品")
+            .toolbar {
+                Button {
+                    Task { await viewModel.loadWorks() }
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .accessibilityLabel("刷新作品")
+            }
+            .task {
+                await viewModel.loadWorks()
+            }
+        }
+    }
+}
 
+private struct ProfileView: View {
+    @EnvironmentObject private var viewModel: CardifyViewModel
+
+    var body: some View {
+        NavigationStack {
+            List {
                 Section("账户与订阅") {
                     if let user = viewModel.currentUser {
                         HStack {
@@ -626,17 +1073,6 @@ private struct ProfileView: View {
                 }
             }
             .navigationTitle("我的")
-            .toolbar {
-                Button {
-                    Task { await viewModel.loadWorks() }
-                } label: {
-                    Image(systemName: "arrow.clockwise")
-                }
-                .accessibilityLabel("刷新作品")
-            }
-            .task {
-                await viewModel.loadWorks()
-            }
         }
     }
 }
@@ -723,6 +1159,17 @@ private struct WorkRow: View {
 }
 
 private extension View {
+    func cardifyEditorFieldSurface() -> some View {
+        background(
+            Color.cardifyInk.opacity(0.028),
+            in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(Color.cardifyInk.opacity(0.09), lineWidth: 1)
+        )
+    }
+
     @ViewBuilder
     func cardifyInlineNavigationTitle() -> some View {
         #if os(iOS)

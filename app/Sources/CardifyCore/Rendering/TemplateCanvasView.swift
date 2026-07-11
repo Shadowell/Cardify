@@ -17,17 +17,16 @@ public struct TemplateCanvasView: View {
 
     public var body: some View {
         GeometryReader { proxy in
+            let scale = renderScale(in: proxy.size)
             ZStack {
                 backgroundColor
                 ForEach(template.layers) { layer in
-                    render(layer, in: proxy.size)
+                    render(layer, in: proxy.size, scale: scale)
                 }
             }
-            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: max(4, 18 * scale), style: .continuous))
         }
         .aspectRatio(CGFloat(canvasSize.width) / CGFloat(canvasSize.height), contentMode: .fit)
-        .background(backgroundColor)
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
     private var backgroundColor: Color {
@@ -35,11 +34,18 @@ public struct TemplateCanvasView: View {
     }
 
     private var palette: CardPalette {
-        CardPalette(theme: content.theme)
+        CardPalette(theme: content.theme, tokens: template.tokens)
+    }
+
+    private func renderScale(in size: CGSize) -> CGFloat {
+        min(
+            size.width / CGFloat(canvasSize.width),
+            size.height / CGFloat(canvasSize.height)
+        )
     }
 
     @ViewBuilder
-    private func render(_ layer: TemplateLayer, in size: CGSize) -> some View {
+    private func render(_ layer: TemplateLayer, in size: CGSize, scale: CGFloat) -> some View {
         let rect = CGRect(
             x: size.width * layer.frame.x,
             y: size.height * layer.frame.y,
@@ -49,32 +55,63 @@ public struct TemplateCanvasView: View {
 
         switch layer.type {
         case .text:
-            text(for: layer)
-                .frame(width: rect.width, height: rect.height, alignment: .topLeading)
+            text(for: layer, scale: scale)
+                .frame(width: rect.width, height: rect.height, alignment: frameAlignment(for: layer))
                 .position(x: rect.midX, y: rect.midY)
         case .image:
-            imagePlaceholder(for: layer)
+            imagePlaceholder(for: layer, scale: scale)
                 .frame(width: rect.width, height: rect.height)
                 .position(x: rect.midX, y: rect.midY)
         case .avatar:
-            avatar(for: layer, rect: rect)
+            avatar(for: layer, rect: rect, scale: scale)
         case .qr:
-            QRPlaceholder()
+            QRPlaceholder(scale: scale)
                 .frame(width: rect.width, height: rect.height)
                 .position(x: rect.midX, y: rect.midY)
         case .metrics:
-            metrics(for: layer)
+            metrics(for: layer, scale: scale)
                 .frame(width: rect.width, height: rect.height, alignment: .leading)
                 .position(x: rect.midX, y: rect.midY)
         case .shape:
-            RoundedRectangle(cornerRadius: layer.style.double("radius", default: 18), style: .continuous)
-                .fill(fillColor(for: layer))
+            shape(for: layer, scale: scale)
                 .frame(width: rect.width, height: rect.height)
                 .position(x: rect.midX, y: rect.midY)
         }
     }
 
-    private func text(for layer: TemplateLayer) -> some View {
+    private func shape(for layer: TemplateLayer, scale: CGFloat) -> some View {
+        let radius = layer.style.double("radius", default: 18) * scale
+        let fillOpacity = layer.style.double("fill_opacity", default: 1)
+        let pattern = layer.style.string("pattern", default: "")
+        let patternColor = Color(hex: layer.style.string("pattern_color", default: "#000000")) ?? palette.ink
+        let patternOpacity = layer.style.double("pattern_opacity", default: 0.1)
+        let patternSpacing = layer.style.double("pattern_spacing", default: 36) * scale
+        let stroke = layer.style.string("stroke", default: "")
+        let strokeColor = Color(hex: stroke) ?? .clear
+        let strokeWidth = layer.style.double("stroke_width", default: 1) * scale
+        let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
+
+        return shape
+            .fill(fillColor(for: layer).opacity(fillOpacity))
+            .overlay {
+                if !pattern.isEmpty {
+                    TemplatePattern(
+                        kind: pattern,
+                        color: patternColor,
+                        opacity: patternOpacity,
+                        spacing: max(2, patternSpacing)
+                    )
+                    .clipShape(shape)
+                }
+            }
+            .overlay {
+                if !stroke.isEmpty {
+                    shape.stroke(strokeColor, lineWidth: max(0.5, strokeWidth))
+                }
+            }
+    }
+
+    private func text(for layer: TemplateLayer, scale: CGFloat) -> some View {
         let value: String
         switch layer.role {
         case "title":
@@ -86,28 +123,53 @@ public struct TemplateCanvasView: View {
         case "author_name":
             value = content.authorName
         default:
-            value = ""
+            value = layer.style.string("text", default: "")
         }
 
-        let size = layer.style.double("font_size", default: 24)
-        let weight = layer.style.string("weight", default: "regular")
+        let size = max(1, layer.style.double("font_size", default: 24) * scale)
 
         return Text(value)
-            .font(.system(size: size, weight: weight == "bold" ? .bold : .regular, design: .default))
+            .font(.system(size: size, weight: fontWeight(for: layer), design: .default))
             .foregroundStyle(textColor(for: layer))
             .lineLimit(layer.maxLines)
             .minimumScaleFactor(0.72)
-            .multilineTextAlignment(.leading)
+            .multilineTextAlignment(textAlignment(for: layer))
+    }
+
+    private func fontWeight(for layer: TemplateLayer) -> Font.Weight {
+        switch layer.style.string("weight", default: "regular") {
+        case "bold": return .bold
+        case "semibold": return .semibold
+        case "medium": return .medium
+        default: return .regular
+        }
+    }
+
+    private func frameAlignment(for layer: TemplateLayer) -> Alignment {
+        switch layer.style.string("alignment", default: "leading") {
+        case "center": return .top
+        case "trailing": return .topTrailing
+        default: return .topLeading
+        }
+    }
+
+    private func textAlignment(for layer: TemplateLayer) -> TextAlignment {
+        switch layer.style.string("alignment", default: "leading") {
+        case "center": return .center
+        case "trailing": return .trailing
+        default: return .leading
+        }
     }
 
     private func textColor(for layer: TemplateLayer) -> Color {
         switch layer.style.string("color", default: "ink") {
         case "muted":
-            return content.theme == .ink ? .white.opacity(0.72) : .cardifyMuted
+            return palette.muted
         case "paper":
             return .white
         default:
-            return content.theme == .ink ? .white : .cardifyInk
+            let color = layer.style.string("color", default: "ink")
+            return Color(hex: color) ?? palette.ink
         }
     }
 
@@ -117,43 +179,52 @@ public struct TemplateCanvasView: View {
         case "mint": return palette.accent
         case "sky": return palette.secondary
         case "pink": return palette.highlight
-        case "ink": return Color.cardifyInk
+        case "gold": return palette.highlight
+        case "ink": return palette.ink
         default:
             return Color(hex: layer.style.string("fill", default: "#FFFFFF")) ?? palette.paper
         }
     }
 
-    private func imagePlaceholder(for layer: TemplateLayer) -> some View {
+    private func imagePlaceholder(for layer: TemplateLayer, scale: CGFloat) -> some View {
         ZStack(alignment: .bottomTrailing) {
-            coverImage
-                .clipShape(RoundedRectangle(cornerRadius: layer.style.double("radius", default: 26), style: .continuous))
+            coverImage(scale: scale)
+                .clipShape(
+                    RoundedRectangle(
+                        cornerRadius: layer.style.double("radius", default: 26) * scale,
+                        style: .continuous
+                    )
+                )
 
-            Text("共3张")
-                .font(.caption.weight(.semibold))
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(.black.opacity(0.35), in: Capsule())
-                .foregroundStyle(.white)
-                .padding(12)
+            let badge = layer.style.string("badge", default: "")
+            if !badge.isEmpty {
+                Text(badge)
+                    .font(.system(size: max(1, 12 * scale), weight: .semibold))
+                    .padding(.horizontal, 10 * scale)
+                    .padding(.vertical, 6 * scale)
+                    .background(.black.opacity(0.35), in: Capsule())
+                    .foregroundStyle(.white)
+                    .padding(12 * scale)
+            }
         }
     }
 
     @ViewBuilder
-    private var coverImage: some View {
+    private func coverImage(scale: CGFloat) -> some View {
         #if canImport(UIKit)
         if let data = content.coverImageData, let image = UIImage(data: data) {
             Image(uiImage: image)
                 .resizable()
                 .scaledToFill()
         } else {
-            coverPlaceholder
+            coverPlaceholder(scale: scale)
         }
         #else
-        coverPlaceholder
+        coverPlaceholder(scale: scale)
         #endif
     }
 
-    private var coverPlaceholder: some View {
+    private func coverPlaceholder(scale: CGFloat) -> some View {
         LinearGradient(
             colors: [palette.accent, palette.secondary, palette.highlight],
             startPoint: .topLeading,
@@ -161,14 +232,14 @@ public struct TemplateCanvasView: View {
         )
         .overlay(alignment: .bottomLeading) {
             Text(template.tokens.string("category", default: "Cardify"))
-                .font(.caption.weight(.bold))
-                .foregroundStyle(content.theme == .ink ? Color.white.opacity(0.72) : Color.cardifyInk.opacity(0.62))
-                .padding(16)
+                .font(.system(size: max(1, 12 * scale), weight: .bold))
+                .foregroundStyle(palette.ink.opacity(0.62))
+                .padding(16 * scale)
         }
     }
 
     @ViewBuilder
-    private func avatar(for layer: TemplateLayer, rect: CGRect) -> some View {
+    private func avatar(for layer: TemplateLayer, rect: CGRect, scale: CGFloat) -> some View {
         let size = min(rect.width, rect.height)
         Circle()
             .fill(palette.accent)
@@ -180,13 +251,13 @@ public struct TemplateCanvasView: View {
                         .scaledToFill()
                 } else {
                     Text(String(content.authorName.prefix(1)))
-                        .font(.headline.weight(.bold))
-                        .foregroundStyle(Color.cardifyInk)
+                        .font(.system(size: max(1, 17 * scale), weight: .bold))
+                        .foregroundStyle(palette.ink)
                 }
                 #else
                 Text(String(content.authorName.prefix(1)))
-                    .font(.headline.weight(.bold))
-                    .foregroundStyle(Color.cardifyInk)
+                    .font(.system(size: max(1, 17 * scale), weight: .bold))
+                    .foregroundStyle(palette.ink)
                 #endif
             }
             .clipShape(Circle())
@@ -195,27 +266,27 @@ public struct TemplateCanvasView: View {
     }
 
     @ViewBuilder
-    private func metrics(for layer: TemplateLayer) -> some View {
+    private func metrics(for layer: TemplateLayer, scale: CGFloat) -> some View {
         if layer.style.string("orientation", default: "horizontal") == "vertical" {
-            VStack(spacing: 12) {
-                metricText("赞", value: content.metrics["likes"])
-                metricText("评", value: content.metrics["comments"])
-                metricText("藏", value: content.metrics["favorites"])
+            VStack(spacing: 12 * scale) {
+                metricText("赞", value: content.metrics["likes"], scale: scale)
+                metricText("评", value: content.metrics["comments"], scale: scale)
+                metricText("藏", value: content.metrics["favorites"], scale: scale)
             }
             .foregroundStyle(.white)
         } else {
-            HStack(spacing: 14) {
-                metricText("赞", value: content.metrics["likes"])
-                metricText("藏", value: content.metrics["favorites"])
-                metricText("评", value: content.metrics["comments"])
+            HStack(spacing: 14 * scale) {
+                metricText("赞", value: content.metrics["likes"], scale: scale)
+                metricText("藏", value: content.metrics["favorites"], scale: scale)
+                metricText("评", value: content.metrics["comments"], scale: scale)
             }
-            .foregroundStyle(Color.cardifyMuted)
+            .foregroundStyle(palette.muted)
         }
     }
 
-    private func metricText(_ label: String, value: Int?) -> some View {
+    private func metricText(_ label: String, value: Int?, scale: CGFloat) -> some View {
         Text("\(label) \(value ?? 0)")
-            .font(.caption.weight(.medium))
+            .font(.system(size: max(1, 12 * scale), weight: .medium))
             .lineLimit(1)
             .minimumScaleFactor(0.75)
     }
@@ -223,34 +294,56 @@ public struct TemplateCanvasView: View {
 
 private struct CardPalette {
     let paper: Color
+    let ink: Color
+    let muted: Color
     let accent: Color
     let secondary: Color
     let highlight: Color
 
-    init(theme: CardTheme) {
+    init(theme: CardTheme, tokens: [String: JSONValue]) {
+        if theme == .mint, let values = tokens.object("palette") {
+            paper = Color(hex: values.string("paper", default: "#FFFFFD")) ?? .cardifyPaper
+            ink = Color(hex: values.string("ink", default: "#14231F")) ?? .cardifyInk
+            muted = Color(hex: values.string("muted", default: "#6F8079")) ?? .cardifyMuted
+            accent = Color(hex: values.string("mint", default: "#DFF8EC")) ?? .cardifyMint
+            secondary = Color(hex: values.string("sky", default: "#EAF7FF")) ?? .cardifySky
+            highlight = Color(hex: values.string("pink", default: "#FFF0F3")) ?? .cardifyPink
+            return
+        }
+
         switch theme {
         case .mint:
             paper = .cardifyPaper
+            ink = .cardifyInk
+            muted = .cardifyMuted
             accent = .cardifyMint
             secondary = .cardifySky
             highlight = .cardifyPink
         case .sky:
             paper = Color(red: 0.98, green: 0.99, blue: 1)
+            ink = .cardifyInk
+            muted = .cardifyMuted
             accent = Color(red: 0.82, green: 0.92, blue: 1)
             secondary = Color(red: 0.87, green: 0.96, blue: 1)
             highlight = Color(red: 0.92, green: 0.91, blue: 1)
         case .blush:
             paper = Color(red: 1, green: 0.99, blue: 0.99)
+            ink = .cardifyInk
+            muted = .cardifyMuted
             accent = Color(red: 1, green: 0.87, blue: 0.9)
             secondary = Color(red: 1, green: 0.94, blue: 0.84)
             highlight = Color(red: 0.98, green: 0.9, blue: 0.95)
         case .gold:
             paper = Color(red: 1, green: 0.99, blue: 0.95)
+            ink = .cardifyInk
+            muted = .cardifyMuted
             accent = Color(red: 0.95, green: 0.88, blue: 0.67)
             secondary = Color(red: 0.91, green: 0.95, blue: 0.86)
             highlight = Color(red: 1, green: 0.92, blue: 0.84)
         case .ink:
             paper = Color(red: 0.09, green: 0.14, blue: 0.12)
+            ink = .white
+            muted = .white.opacity(0.72)
             accent = Color(red: 0.25, green: 0.54, blue: 0.43)
             secondary = Color(red: 0.17, green: 0.28, blue: 0.25)
             highlight = Color(red: 0.79, green: 0.72, blue: 0.42)
@@ -258,7 +351,61 @@ private struct CardPalette {
     }
 }
 
+private struct TemplatePattern: View {
+    let kind: String
+    let color: Color
+    let opacity: Double
+    let spacing: CGFloat
+
+    var body: some View {
+        Canvas { context, size in
+            switch kind {
+            case "dots":
+                var y: CGFloat = spacing / 2
+                while y < size.height {
+                    var x: CGFloat = spacing / 2
+                    while x < size.width {
+                        let dot = CGRect(x: x - 1, y: y - 1, width: 2, height: 2)
+                        context.fill(Path(ellipseIn: dot), with: .color(color.opacity(opacity)))
+                        x += spacing
+                    }
+                    y += spacing
+                }
+            case "diagonal":
+                var x = -size.height
+                while x < size.width {
+                    var line = Path()
+                    line.move(to: CGPoint(x: x, y: 0))
+                    line.addLine(to: CGPoint(x: x + size.height, y: size.height))
+                    context.stroke(line, with: .color(color.opacity(opacity)), lineWidth: 1)
+                    x += spacing
+                }
+            default:
+                var x: CGFloat = spacing
+                while x < size.width {
+                    var line = Path()
+                    line.move(to: CGPoint(x: x, y: 0))
+                    line.addLine(to: CGPoint(x: x, y: size.height))
+                    context.stroke(line, with: .color(color.opacity(opacity)), lineWidth: 1)
+                    x += spacing
+                }
+                var y: CGFloat = spacing
+                while y < size.height {
+                    var line = Path()
+                    line.move(to: CGPoint(x: 0, y: y))
+                    line.addLine(to: CGPoint(x: size.width, y: y))
+                    context.stroke(line, with: .color(color.opacity(opacity)), lineWidth: 1)
+                    y += spacing
+                }
+            }
+        }
+        .accessibilityHidden(true)
+    }
+}
+
 private struct QRPlaceholder: View {
+    let scale: CGFloat
+
     var body: some View {
         GeometryReader { proxy in
             let cell = min(proxy.size.width, proxy.size.height) / 7
@@ -271,8 +418,8 @@ private struct QRPlaceholder: View {
                 }
             }
         }
-        .padding(8)
-        .background(.white, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .padding(8 * scale)
+        .background(.white, in: RoundedRectangle(cornerRadius: 10 * scale, style: .continuous))
     }
 }
 
@@ -283,6 +430,8 @@ public extension Color {
     static let cardifyMint = Color(red: 0.87, green: 0.97, blue: 0.92)
     static let cardifySky = Color(red: 0.92, green: 0.97, blue: 1)
     static let cardifyPink = Color(red: 1, green: 0.94, blue: 0.96)
+    static let cardifyNavActive = Color(red: 0.12, green: 0.60, blue: 0.45)
+    static let cardifyNavInactive = Color(red: 0.43, green: 0.52, blue: 0.49)
 
     init?(hex: String) {
         let value = hex.trimmingCharacters(in: CharacterSet(charactersIn: "#"))
