@@ -8,6 +8,7 @@ def test_templates_are_seeded(client):
     items = response.json()["items"]
     assert len(items) == 20
     assert len({item["id"] for item in items}) == 20
+    assert [item["id"] for item in items[:3]] == ["note-share-poster", "local-store", "travel-guide"]
     assert {"知识卡", "育儿", "营销", "视频卡", "旅行", "探店", "分享卡", "生活"}.issubset(
         {item["category"] for item in items}
     )

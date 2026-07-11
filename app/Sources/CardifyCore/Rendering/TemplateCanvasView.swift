@@ -99,7 +99,7 @@ public struct TemplateCanvasView: View {
                         kind: pattern,
                         color: patternColor,
                         opacity: patternOpacity,
-                        spacing: max(2, patternSpacing)
+                        spacing: max(8, patternSpacing)
                     )
                     .clipShape(shape)
                 }
