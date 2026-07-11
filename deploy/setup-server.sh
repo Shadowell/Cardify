@@ -38,4 +38,11 @@ visudo -cf /etc/sudoers.d/cardify-runner
 sed "s|__CARDIFY_APP_DIR__|${APP_DIR}|g" "${SCRIPT_DIR}/cardify-backend.service" > "/etc/systemd/system/${SERVICE_NAME}.service"
 systemctl daemon-reload
 
+if command -v nginx >/dev/null 2>&1 && [[ ! -e /etc/nginx/sites-available/cardify ]]; then
+  install -m 644 "${SCRIPT_DIR}/cardify.nginx" /etc/nginx/sites-available/cardify
+  ln -sfn /etc/nginx/sites-available/cardify /etc/nginx/sites-enabled/cardify
+  nginx -t
+  systemctl reload nginx
+fi
+
 echo "Server setup is ready. Create ${APP_DIR}/backend/.env, then run deploy/setup-github-runner.sh to register the self-hosted runner."

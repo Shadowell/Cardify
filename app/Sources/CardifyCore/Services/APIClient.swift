@@ -9,11 +9,11 @@ public struct APIClient: Sendable {
     private let decoder: JSONDecoder
 
     public init(
-        baseURL: URL = URL(string: "http://127.0.0.1:8000")!,
+        baseURL: URL? = nil,
         session: URLSession = .shared,
         accessToken: String? = nil
     ) {
-        self.baseURL = baseURL
+        self.baseURL = baseURL ?? Self.defaultBaseURL
         self.session = session
         self.accessToken = accessToken
         let encoder = JSONEncoder()
@@ -82,7 +82,7 @@ public struct APIClient: Sendable {
         var request = URLRequest(url: url(for: path))
         request.httpMethod = method
         authorize(&request)
-        let (data, urlResponse) = try await session.data(for: request)
+        let (data, urlResponse) = try await send(request)
         try validate(urlResponse, data: data)
         return try decoder.decode(Response.self, from: data)
     }
@@ -98,7 +98,7 @@ public struct APIClient: Sendable {
         authorize(&request)
         request.httpBody = try encoder.encode(body)
 
-        let (data, urlResponse) = try await session.data(for: request)
+        let (data, urlResponse) = try await send(request)
         try validate(urlResponse, data: data)
         return try decoder.decode(Response.self, from: data)
     }
@@ -113,6 +113,14 @@ public struct APIClient: Sendable {
         }
     }
 
+    private func send(_ request: URLRequest) async throws -> (Data, URLResponse) {
+        do {
+            return try await session.data(for: request)
+        } catch is URLError {
+            throw APIError.connection(baseURL)
+        }
+    }
+
     private func url(for path: String) -> URL {
         let base = baseURL.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         let cleanPath = path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
@@ -123,11 +131,33 @@ public struct APIClient: Sendable {
         guard let accessToken else { return }
         request.addValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
     }
+
+    private static var defaultBaseURL: URL {
+        if let configuredURL = Bundle.main.object(forInfoDictionaryKey: "CARDIFY_API_URL") as? String,
+           let url = URL(string: configuredURL),
+           url.scheme != nil,
+           url.host != nil {
+            return url
+        }
+        return URL(string: "https://www.cardify.notenap.com")!
+    }
 }
 
 public struct EmptyResponse: Decodable, Sendable {}
 
-public enum APIError: Error, Equatable {
+public enum APIError: Error, Equatable, LocalizedError {
     case invalidResponse
+    case connection(URL)
     case server(statusCode: Int, message: String)
+
+    public var errorDescription: String? {
+        switch self {
+        case .invalidResponse:
+            return "服务器返回了无效响应"
+        case .connection(let url):
+            return "无法连接后端服务：\(url.absoluteString)"
+        case .server(let statusCode, let message):
+            return "服务器错误（\(statusCode)）：\(message)"
+        }
+    }
 }
