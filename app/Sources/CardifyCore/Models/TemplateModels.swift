@@ -66,6 +66,13 @@ public extension Dictionary where Key == String, Value == JSONValue {
         return defaultValue
     }
 
+    func bool(_ key: String, default defaultValue: Bool) -> Bool {
+        if case .bool(let value)? = self[key] {
+            return value
+        }
+        return defaultValue
+    }
+
     func object(_ key: String) -> [String: JSONValue]? {
         if case .object(let value)? = self[key] {
             return value
@@ -226,8 +233,8 @@ public struct CardContent: Equatable, Sendable {
 
     public init(
         title: String = "把文字变成值得分享的卡片",
-        summary: String = "输入内容后，Cardify 会整理成适合发布的标题、摘要和标签。",
-        tags: [String] = ["#Cardify", "#图文笔记"],
+        summary: String = "输入标题和正文后，即可生成可分享的卡片。",
+        tags: [String] = [],
         authorName: String = "Cardify",
         metrics: [String: Int] = ["likes": 4263, "favorites": 791, "comments": 120],
         theme: CardTheme = .mint,

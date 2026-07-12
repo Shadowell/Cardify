@@ -184,25 +184,34 @@ private struct HomeView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 20) {
-                    ZStack(alignment: .topLeading) {
-                        TextEditor(text: $viewModel.inputText)
-                            .frame(height: 120)
-                            .padding(10)
-                            .scrollContentBackground(.hidden)
+                    VStack(alignment: .leading, spacing: 14) {
+                        Text("内容")
+                            .font(.headline.weight(.semibold))
+                            .foregroundStyle(Color.cardifyInk)
 
-                        if viewModel.inputText.isEmpty {
-                            Text("粘贴一段文字，Cardify 会整理成标题、摘要和标签")
+                        VStack(alignment: .leading, spacing: 7) {
+                            Text("标题")
+                                .font(.subheadline.weight(.medium))
                                 .foregroundStyle(Color.cardifyMuted)
-                                .padding(.horizontal, 18)
-                                .padding(.vertical, 20)
-                                .allowsHitTesting(false)
+                            TextField("输入卡片标题", text: $viewModel.inputTitle, axis: .vertical)
+                                .lineLimit(1...3)
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 11)
+                                .cardifyEditorFieldSurface()
+                        }
+
+                        VStack(alignment: .leading, spacing: 7) {
+                            Text("正文")
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(Color.cardifyMuted)
+                            TextEditor(text: $viewModel.inputBody)
+                                .frame(height: 138)
+                                .padding(9)
+                                .scrollContentBackground(.hidden)
+                                .cardifyEditorFieldSurface()
+                                .accessibilityLabel("正文")
                         }
                     }
-                    .background(Color.cardifyPaper, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .stroke(Color.cardifyMint, lineWidth: 1)
-                    )
 
                     HomeTemplatePicker()
 
@@ -244,15 +253,20 @@ private struct HomeView: View {
     }
 
     private var canGenerate: Bool {
-        !viewModel.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && viewModel.selectedTemplate != nil
+        !viewModel.inputTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !viewModel.inputBody.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && viewModel.selectedTemplate != nil
     }
 
     private var generationButtonTitle: String {
         if viewModel.isLoading {
             return "生成中"
         }
-        if viewModel.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return "先输入文字"
+        if viewModel.inputTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "先输入标题"
+        }
+        if viewModel.inputBody.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "再输入正文"
         }
         if viewModel.selectedTemplate == nil {
             return "选择模板后生成"
@@ -276,7 +290,7 @@ private struct HomeTemplatePicker: View {
                 Spacer()
             }
 
-            if viewModel.isLoading && viewModel.templates.isEmpty {
+            if viewModel.isLoadingTemplates && viewModel.templates.isEmpty {
                 HStack(spacing: 8) {
                     ProgressView()
                     Text("正在加载模板")
@@ -450,7 +464,7 @@ private struct TemplateMiniThumbnail: View {
         CardContent(
             title: template.name,
             summary: "清晰重点",
-            tags: ["#Cardify"],
+            tags: [],
             authorName: "Cardify",
             theme: .mint
         )
@@ -547,7 +561,7 @@ private struct TemplatePreviewSheet: View {
         CardContent(
             title: template.name,
             summary: "为内容留出清晰重点，让信息更容易阅读和分享。",
-            tags: ["#Cardify", "#内容创作"],
+            tags: [],
             authorName: "Cardify",
             theme: .mint
         )
@@ -595,7 +609,7 @@ private struct TemplateThumbnail: View {
         CardContent(
             title: template.name,
             summary: "为内容留出清晰重点",
-            tags: ["#Cardify"],
+            tags: [],
             authorName: "Cardify",
             theme: .mint
         )
@@ -726,13 +740,6 @@ private struct EditorView: View {
                                     .accessibilityLabel("正文")
                             }
 
-                            VStack(alignment: .leading, spacing: 7) {
-                                EditorFieldLabel("标签")
-                                TextField("使用空格分隔标签", text: tagsBinding)
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 10)
-                                    .cardifyEditorFieldSurface()
-                            }
                         }
 
                         Divider()
@@ -912,16 +919,6 @@ private struct EditorView: View {
                     }
                 }
             }
-        }
-    }
-
-    private var tagsBinding: Binding<String> {
-        Binding {
-            viewModel.generatedContent.tags.joined(separator: " ")
-        } set: { value in
-            viewModel.generatedContent.tags = value
-                .split(whereSeparator: { $0.isWhitespace || $0 == "," || $0 == "，" })
-                .map(String.init)
         }
     }
 

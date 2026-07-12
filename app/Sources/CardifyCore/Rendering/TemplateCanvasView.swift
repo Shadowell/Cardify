@@ -56,9 +56,11 @@ public struct TemplateCanvasView: View {
 
         switch layer.type {
         case .text:
-            text(for: layer, scale: scale)
-                .frame(width: rect.width, height: rect.height, alignment: frameAlignment(for: layer))
-                .position(x: rect.midX, y: rect.midY)
+            if !(layer.style.bool("hide_without_cover", default: false) && content.coverImageData == nil) {
+                text(for: layer, scale: scale)
+                    .frame(width: rect.width, height: rect.height, alignment: frameAlignment(for: layer))
+                    .position(x: rect.midX, y: rect.midY)
+            }
         case .image:
             imagePlaceholder(for: layer, scale: scale)
                 .frame(width: rect.width, height: rect.height)
@@ -190,7 +192,7 @@ public struct TemplateCanvasView: View {
 
     private func imagePlaceholder(for layer: TemplateLayer, scale: CGFloat) -> some View {
         ZStack(alignment: .bottomTrailing) {
-            coverImage(scale: scale)
+            coverImage(for: layer, scale: scale)
                 .clipShape(
                     RoundedRectangle(
                         cornerRadius: layer.style.double("radius", default: 26) * scale,
@@ -212,31 +214,60 @@ public struct TemplateCanvasView: View {
     }
 
     @ViewBuilder
-    private func coverImage(scale: CGFloat) -> some View {
+    private func coverImage(for layer: TemplateLayer, scale: CGFloat) -> some View {
         #if canImport(UIKit)
         if let data = content.coverImageData, let image = UIImage(data: data) {
             Image(uiImage: image)
                 .resizable()
                 .scaledToFill()
         } else {
-            coverPlaceholder(scale: scale)
+            coverPlaceholder(for: layer, scale: scale)
         }
         #else
-        coverPlaceholder(scale: scale)
+        coverPlaceholder(for: layer, scale: scale)
         #endif
     }
 
-    private func coverPlaceholder(scale: CGFloat) -> some View {
-        LinearGradient(
-            colors: [palette.accent, palette.secondary, palette.highlight],
-            startPoint: .topLeading,
-            endPoint: .bottomTrailing
-        )
-        .overlay(alignment: .bottomLeading) {
-            Text(template.tokens.string("category", default: "Cardify"))
-                .font(.system(size: max(1, 12 * scale), weight: .bold))
-                .foregroundStyle(palette.ink.opacity(0.62))
-                .padding(16 * scale)
+    private func coverPlaceholder(for layer: TemplateLayer, scale: CGFloat) -> some View {
+        ZStack(alignment: .bottomLeading) {
+            palette.secondary.opacity(0.74)
+
+            TemplatePattern(
+                kind: coverPattern,
+                color: palette.paper,
+                opacity: 0.58,
+                spacing: max(12, 30 * scale)
+            )
+
+            VStack(alignment: .leading, spacing: 10 * scale) {
+                Rectangle()
+                    .fill(palette.highlight.opacity(0.9))
+                    .frame(width: 42 * scale, height: 6 * scale)
+                    .clipShape(Capsule())
+
+                if layer.style.bool("content_title_when_empty", default: false) {
+                    Text(content.title)
+                        .font(.system(size: max(1, 36 * scale), weight: .bold))
+                        .foregroundStyle(palette.ink)
+                        .lineLimit(4)
+                        .minimumScaleFactor(0.58)
+                        .multilineTextAlignment(.leading)
+                }
+            }
+            .padding(18 * scale)
+        }
+    }
+
+    private var coverPattern: String {
+        switch template.tokens.string("category", default: "") {
+        case "知识卡": return "blueprint"
+        case "分享卡": return "confetti"
+        case "育儿": return "playful"
+        case "营销": return "rays"
+        case "视频卡": return "scanlines"
+        case "旅行": return "contours"
+        case "探店": return "checker"
+        default: return "waves"
         }
     }
 

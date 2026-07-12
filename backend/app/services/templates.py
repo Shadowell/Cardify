@@ -165,6 +165,25 @@ def base_schema(default_canvas_size_id: str, category: str, layers: list[dict]) 
     if layers and layers[0].get("role") == "background":
         content_layers = layers[1:]
 
+    # Tags are not part of the MVP authoring flow. When a cover is absent, let the
+    # user's title become the visual anchor instead of showing a generic placeholder.
+    content_layers = [layer for layer in content_layers if layer.get("role") != "tags"]
+    has_title_surface = False
+    refined_layers = []
+    for layer in content_layers:
+        refined_layer = {**layer, "style": {**layer.get("style", {})}}
+        if refined_layer.get("type") == "image" and refined_layer.get("role") == "cover_image":
+            refined_layer["style"].setdefault("content_title_when_empty", True)
+            has_title_surface = refined_layer["style"]["content_title_when_empty"]
+        refined_layers.append(refined_layer)
+
+    if has_title_surface:
+        for layer in refined_layers:
+            if layer.get("type") == "text" and layer.get("role") == "title":
+                layer["style"].setdefault("hide_without_cover", True)
+
+    content_layers = refined_layers
+
     return {
         "schema_version": "1.0",
         "canvas_sizes": CANVAS_SIZES,
@@ -490,13 +509,14 @@ SEED_TEMPLATES = [
             "xhs-4-5",
             "分享卡",
             [
-                {"id": "image", "type": "image", "role": "cover_image", "frame": {"x": 0.07, "y": 0.07, "width": 0.48, "height": 0.5}, "style": {"radius": 30}},
-                {"id": "rating", "type": "shape", "role": "rating", "frame": {"x": 0.61, "y": 0.08, "width": 0.3, "height": 0.12}, "style": {"fill": "pink", "radius": 24}},
-                {"id": "rating-text", "type": "text", "role": "static", "frame": {"x": 0.64, "y": 0.11, "width": 0.24, "height": 0.05}, "max_lines": 1, "style": {"text": "REVIEW 4.8", "font_size": 20, "weight": "semibold", "alignment": "center"}},
-                {"id": "title", "type": "text", "role": "title", "frame": {"x": 0.61, "y": 0.27, "width": 0.32, "height": 0.24}, "max_lines": 4, "style": {"font_size": 34, "weight": "bold"}},
-                {"id": "summary-panel", "type": "shape", "role": "summary_panel", "frame": {"x": 0.07, "y": 0.64, "width": 0.86, "height": 0.2}, "style": {"fill": "pink", "radius": 28}},
-                {"id": "summary", "type": "text", "role": "summary", "frame": {"x": 0.11, "y": 0.68, "width": 0.78, "height": 0.12}, "max_lines": 4, "style": {"font_size": 23}},
-                {"id": "tags", "type": "text", "role": "tags", "frame": {"x": 0.08, "y": 0.89, "width": 0.84, "height": 0.06}, "max_lines": 2, "style": {"font_size": 20, "color": "muted"}},
+                {"id": "eyebrow", "type": "text", "role": "static", "frame": {"x": 0.1, "y": 0.09, "width": 0.8, "height": 0.035}, "max_lines": 1, "style": {"text": "BEAUTY NOTES · 真实体验", "font_size": 18, "weight": "semibold", "color": "muted"}},
+                {"id": "title", "type": "text", "role": "title", "frame": {"x": 0.1, "y": 0.17, "width": 0.8, "height": 0.2}, "max_lines": 3, "style": {"font_size": 46, "weight": "bold", "line_height": 1.2}},
+                {"id": "title-rule", "type": "shape", "role": "accent", "frame": {"x": 0.1, "y": 0.41, "width": 0.2, "height": 0.009}, "style": {"fill": "mint", "radius": 9}},
+                {"id": "summary-panel", "type": "shape", "role": "summary_panel", "frame": {"x": 0.08, "y": 0.48, "width": 0.84, "height": 0.21}, "style": {"fill": "#FFFFFF", "fill_opacity": 0.68, "stroke": "#E8797F", "stroke_width": 1.1, "radius": 24}},
+                {"id": "summary", "type": "text", "role": "summary", "frame": {"x": 0.12, "y": 0.52, "width": 0.76, "height": 0.13}, "max_lines": 4, "style": {"font_size": 24, "line_height": 1.34}},
+                {"id": "note", "type": "shape", "role": "note", "frame": {"x": 0.08, "y": 0.76, "width": 0.32, "height": 0.1}, "style": {"fill": "gold", "radius": 20}},
+                {"id": "note-text", "type": "text", "role": "static", "frame": {"x": 0.11, "y": 0.79, "width": 0.26, "height": 0.035}, "max_lines": 1, "style": {"text": "真实记录", "font_size": 18, "weight": "semibold", "alignment": "center"}},
+                {"id": "image", "type": "image", "role": "cover_image", "frame": {"x": 0.48, "y": 0.74, "width": 0.44, "height": 0.16}, "style": {"radius": 22, "content_title_when_empty": False}},
             ],
         ),
     },

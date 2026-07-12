@@ -88,3 +88,21 @@ def test_each_category_declares_a_distinct_background_pattern():
 
     assert set(category_patterns) == EXPECTED_CATEGORIES
     assert len(set(category_patterns.values())) == len(EXPECTED_CATEGORIES)
+
+
+def test_seed_templates_do_not_render_or_require_tags():
+    for template in SEED_TEMPLATES:
+        document = TemplateDocumentSchema.model_validate(template["schema"])
+        assert all(layer.role != "tags" for layer in document.layers)
+
+
+def test_cover_templates_promote_content_when_no_image_is_provided():
+    for template in SEED_TEMPLATES:
+        document = TemplateDocumentSchema.model_validate(template["schema"])
+        covers = [layer for layer in document.layers if layer.role == "cover_image"]
+        if not covers:
+            continue
+
+        if any(layer.style.get("content_title_when_empty") is True for layer in covers):
+            title = next(layer for layer in document.layers if layer.role == "title")
+            assert title.style.get("hide_without_cover") is True

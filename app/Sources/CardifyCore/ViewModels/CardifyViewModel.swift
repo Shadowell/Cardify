@@ -11,6 +11,8 @@ import StoreKit
 @MainActor
 public final class CardifyViewModel: ObservableObject {
     @Published public var inputText: String = ""
+    @Published public var inputTitle: String = ""
+    @Published public var inputBody: String = ""
     @Published public private(set) var templates: [TemplateSummary] = []
     @Published public private(set) var works: [WorkRecord] = []
     @Published public private(set) var worksTotal = 0
@@ -23,6 +25,7 @@ public final class CardifyViewModel: ObservableObject {
     @Published public var generatedContent = CardContent()
     @Published public var selectedCanvasSizeId: String = "xhs-3-4"
     @Published public private(set) var isLoading = false
+    @Published public private(set) var isLoadingTemplates = false
     @Published public private(set) var isSaving = false
     @Published public private(set) var isAuthenticating = false
     @Published public private(set) var isDeletingAccount = false
@@ -59,8 +62,8 @@ public final class CardifyViewModel: ObservableObject {
     }
 
     public func loadTemplates() async {
-        isLoading = true
-        defer { isLoading = false }
+        isLoadingTemplates = true
+        defer { isLoadingTemplates = false }
         do {
             templates = try await apiClient.listTemplates()
         } catch {
@@ -237,13 +240,24 @@ public final class CardifyViewModel: ObservableObject {
     }
 
     public func useSampleInput() {
-        inputText = "孩子英语启蒙不需要一开始就背单词。每天 15 分钟，把英文儿歌、绘本和日常对话放进固定场景里，孩子会更容易建立语感，也更愿意开口。"
+        inputTitle = "孩子英语启蒙，从每天 15 分钟开始"
+        inputBody = "不需要一开始就背单词。把英文儿歌、绘本和日常对话放进固定场景里，孩子会更容易建立语感，也更愿意开口。"
+        inputText = sourceText(title: inputTitle, body: inputBody)
     }
 
     public func generate() async -> Bool {
-        let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else {
-            errorMessage = "请输入要生成卡片的文字"
+        let title = inputTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        let body = inputBody.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty else {
+            errorMessage = "请输入卡片标题"
+            return false
+        }
+        guard !body.isEmpty else {
+            errorMessage = "请输入正文"
+            return false
+        }
+        guard selectedTemplate != nil else {
+            errorMessage = "请选择模板"
             return false
         }
 
@@ -252,21 +266,13 @@ public final class CardifyViewModel: ObservableObject {
         successMessage = nil
         defer { isLoading = false }
 
-        do {
-            let task = try await apiClient.createGeneration(inputText: text, templateId: selectedTemplate?.id)
-            let finalTask = try await waitForGeneration(task)
-            if let output = finalTask.output {
-                generatedContent = output.cardContent
-                activeWorkId = nil
-                activeDraftId = nil
-                return true
-            }
-            errorMessage = finalTask.error ?? "生成失败，请稍后再试"
-            return false
-        } catch {
-            errorMessage = error.localizedDescription
-            return false
-        }
+        inputText = sourceText(title: title, body: body)
+        generatedContent.title = title
+        generatedContent.summary = body
+        generatedContent.tags = []
+        activeWorkId = nil
+        activeDraftId = nil
+        return true
     }
 
     public func saveCurrentWork() async -> Bool {
@@ -425,6 +431,8 @@ public final class CardifyViewModel: ObservableObject {
             fallbackSummary: work.inputText
         )
         inputText = work.inputText
+        inputTitle = generatedContent.title
+        inputBody = generatedContent.summary
         activeWorkId = work.id
         activeDraftId = nil
         await restoreAssets(for: work)
@@ -467,6 +475,8 @@ public final class CardifyViewModel: ObservableObject {
         generatedContent.coverImageData = draft.coverImageData
         generatedContent.avatarImageData = draft.avatarImageData
         inputText = draft.inputText
+        inputTitle = generatedContent.title
+        inputBody = generatedContent.summary
         activeWorkId = nil
         activeDraftId = draft.id
         successMessage = "已打开本机草稿"
@@ -536,6 +546,10 @@ public final class CardifyViewModel: ObservableObject {
         renderParams["canvas_size_id"] = .string(selectedCanvasSizeId)
         renderParams["schema_version"] = .string(template.schema.schemaVersion)
         return renderParams
+    }
+
+    private func sourceText(title: String, body: String) -> String {
+        "\(title)\n\n\(body)"
     }
 
     private func syncLocalDrafts() async -> Int {
