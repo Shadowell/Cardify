@@ -712,11 +712,10 @@ private struct EditorView: View {
 
                             VStack(alignment: .leading, spacing: 7) {
                                 EditorFieldLabel("正文")
-                                TextEditor(text: $viewModel.generatedContent.summary)
-                                    .font(.body)
-                                    .frame(height: 104)
-                                    .padding(8)
-                                    .scrollContentBackground(.hidden)
+                                TextField("输入正文", text: $viewModel.generatedContent.summary, axis: .vertical)
+                                    .lineLimit(4...8)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 10)
                                     .cardifyEditorFieldSurface()
                                     .accessibilityLabel("正文")
                             }
@@ -887,10 +886,15 @@ private struct EditorView: View {
                             .foregroundStyle(.red)
                             .padding(.top, 4)
                     }
+
+                    Color.clear
+                        .frame(height: 96)
+                        .accessibilityHidden(true)
                 } else {
                     ContentUnavailableView("暂无模板", systemImage: "square.grid.2x2", description: Text("启动后会从后端拉取模板"))
                 }
             }
+            .scrollDismissesKeyboard(.interactively)
             .navigationTitle("预览与编辑")
             .cardifyInlineNavigationTitle()
             .toolbar {
