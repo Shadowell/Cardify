@@ -268,7 +268,7 @@ SEED_TEMPLATES = [
             "视频卡",
             [
                 {"id": "search", "type": "shape", "role": "search_bar", "frame": {"x": 0.13, "y": 0.06, "width": 0.78, "height": 0.05}, "style": {"fill": "#727985", "radius": 18}},
-                {"id": "headline", "type": "text", "role": "title", "frame": {"x": 0.1, "y": 0.23, "width": 0.72, "height": 0.32}, "max_lines": 5, "style": {"font_size": 58, "weight": "bold"}},
+                {"id": "headline", "type": "text", "role": "title", "frame": {"x": 0.1, "y": 0.23, "width": 0.72, "height": 0.32}, "max_lines": 5, "style": {"font_size": 58, "weight": "bold", "color": "paper"}},
                 {"id": "rail", "type": "metrics", "role": "video_metrics", "frame": {"x": 0.84, "y": 0.37, "width": 0.12, "height": 0.34}, "style": {"orientation": "vertical"}},
                 {"id": "caption", "type": "text", "role": "summary", "frame": {"x": 0.06, "y": 0.78, "width": 0.78, "height": 0.1}, "max_lines": 3, "style": {"font_size": 24, "color": "paper"}},
                 {"id": "comment", "type": "shape", "role": "comment_bar", "frame": {"x": 0.06, "y": 0.93, "width": 0.72, "height": 0.045}, "style": {"fill": "#32363C", "radius": 24}},

@@ -58,6 +58,17 @@ public final class CardifyViewModel: ObservableObject {
         activeWorkId = nil
     }
 
+    public func switchTemplateInEditor(_ template: TemplateSummary) {
+        let currentCanvasSizeId = selectedCanvasSizeId
+        selectedTemplate = template
+        if template.schema.canvasSizes.contains(where: { $0.id == currentCanvasSizeId }) {
+            selectedCanvasSizeId = currentCanvasSizeId
+        } else {
+            selectedCanvasSizeId = template.defaultSizeId
+        }
+        activeWorkId = nil
+    }
+
     public func useSampleInput() {
         inputText = "孩子英语启蒙不需要一开始就背单词。每天 15 分钟，把英文儿歌、绘本和日常对话放进固定场景里，孩子会更容易建立语感，也更愿意开口。"
     }

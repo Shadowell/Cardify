@@ -351,6 +351,118 @@ private struct TemplateSelectionCard: View {
     }
 }
 
+private struct EditorTemplateSwitcher: View {
+    @EnvironmentObject private var viewModel: CardifyViewModel
+    let currentTemplate: TemplateSummary
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "square.grid.2x2")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Color.cardifyNavActive)
+                Text("模板")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Color.cardifyInk)
+                Text(currentTemplate.name)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(Color.cardifyMuted)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+            }
+
+            if !viewModel.templates.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    LazyHStack(spacing: 9) {
+                        ForEach(viewModel.templates) { template in
+                            EditorTemplateChip(
+                                template: template,
+                                isSelected: template.id == currentTemplate.id
+                            ) {
+                                viewModel.switchTemplateInEditor(template)
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 1)
+                    .padding(.vertical, 2)
+                }
+            }
+        }
+    }
+}
+
+private struct EditorTemplateChip: View {
+    let template: TemplateSummary
+    let isSelected: Bool
+    let onSelect: () -> Void
+
+    var body: some View {
+        Button(action: onSelect) {
+            HStack(spacing: 8) {
+                TemplateMiniThumbnail(template: template)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(template.name)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Color.cardifyInk)
+                        .lineLimit(1)
+                    Text(template.category)
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(Color.cardifyMuted)
+                        .lineLimit(1)
+                }
+                .frame(width: 64, alignment: .leading)
+
+                if isSelected {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(Color.cardifyNavActive)
+                }
+            }
+            .frame(width: 142, height: 66, alignment: .leading)
+            .padding(.horizontal, 8)
+            .background(
+                isSelected ? Color.cardifyMint.opacity(0.75) : Color.cardifyInk.opacity(0.025),
+                in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(isSelected ? Color.cardifyNavActive.opacity(0.28) : Color.cardifyInk.opacity(0.07), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(template.name)
+        .accessibilityValue(isSelected ? "当前模板" : template.category)
+        .accessibilityHint("切换到此模板")
+    }
+}
+
+private struct TemplateMiniThumbnail: View {
+    let template: TemplateSummary
+
+    private var sampleContent: CardContent {
+        CardContent(
+            title: template.name,
+            summary: "清晰重点",
+            tags: ["#Cardify"],
+            authorName: "Cardify",
+            theme: .mint
+        )
+    }
+
+    var body: some View {
+        TemplateCanvasView(
+            template: template.schema,
+            content: sampleContent,
+            canvasSizeId: template.defaultSizeId
+        )
+        .frame(width: 40, height: 52)
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .shadow(color: .black.opacity(0.06), radius: 4, y: 2)
+        .accessibilityHidden(true)
+    }
+}
+
 private struct TemplateListView: View {
     @EnvironmentObject private var viewModel: CardifyViewModel
     @State private var selectedCategory = "全部"
@@ -522,6 +634,10 @@ private struct EditorView: View {
                         .frame(maxWidth: .infinity)
                         .padding()
                         .shadow(color: .black.opacity(0.12), radius: 18, y: 12)
+
+                    EditorTemplateSwitcher(currentTemplate: template)
+                        .padding(.horizontal)
+                        .padding(.bottom, 2)
 
                     VStack(alignment: .leading, spacing: 20) {
                         Button {
