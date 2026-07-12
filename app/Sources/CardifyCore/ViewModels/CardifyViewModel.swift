@@ -9,6 +9,7 @@ public final class CardifyViewModel: ObservableObject {
     @Published public var inputText: String = ""
     @Published public private(set) var templates: [TemplateSummary] = []
     @Published public private(set) var works: [WorkRecord] = []
+    @Published public private(set) var localDrafts: [LocalDraftRecord] = []
     @Published public private(set) var currentUser: UserRecord?
     @Published public var selectedTemplate: TemplateSummary?
     @Published public var generatedContent = CardContent()
@@ -21,9 +22,11 @@ public final class CardifyViewModel: ObservableObject {
 
     private var apiClient: APIClient
     private var activeWorkId: String?
+    private var activeDraftId: String?
 
     public init(apiClient: APIClient = APIClient()) {
         self.apiClient = apiClient
+        localDrafts = LocalDraftStore.load()
         if let storedSession = LoginSessionStore.load() {
             currentUser = storedSession.user
             self.apiClient.accessToken = storedSession.accessToken
@@ -52,10 +55,38 @@ public final class CardifyViewModel: ObservableObject {
         }
     }
 
+    public func syncLocalDraftsNow(showEmptyState: Bool = true) async {
+        guard currentUser != nil else {
+            return
+        }
+
+        let pendingDraftCount = localDrafts.count
+        guard pendingDraftCount > 0 else {
+            if showEmptyState {
+                successMessage = "没有需要同步的本机草稿"
+            }
+            return
+        }
+
+        isSaving = true
+        errorMessage = nil
+        successMessage = nil
+        defer { isSaving = false }
+
+        let syncedDraftCount = await syncLocalDrafts()
+        await loadWorks()
+        if syncedDraftCount > 0 {
+            successMessage = "已同步 \(syncedDraftCount) 个本机草稿"
+        } else {
+            errorMessage = "暂时无法同步草稿，请检查网络后重试"
+        }
+    }
+
     public func selectTemplate(_ template: TemplateSummary) {
         selectedTemplate = template
         selectedCanvasSizeId = template.defaultSizeId
         activeWorkId = nil
+        activeDraftId = nil
     }
 
     public func switchTemplateInEditor(_ template: TemplateSummary) {
@@ -91,6 +122,7 @@ public final class CardifyViewModel: ObservableObject {
             if let output = finalTask.output {
                 generatedContent = output.cardContent
                 activeWorkId = nil
+                activeDraftId = nil
                 return true
             }
             errorMessage = finalTask.error ?? "生成失败，请稍后再试"
@@ -102,10 +134,6 @@ public final class CardifyViewModel: ObservableObject {
     }
 
     public func saveCurrentWork() async -> Bool {
-        guard currentUser != nil else {
-            errorMessage = "请先通过 Apple 登录后再保存作品"
-            return false
-        }
         guard let selectedTemplate else {
             errorMessage = "请先选择模板"
             return false
@@ -116,10 +144,16 @@ public final class CardifyViewModel: ObservableObject {
         successMessage = nil
         defer { isSaving = false }
 
+        guard currentUser != nil else {
+            saveLocalDraft(for: selectedTemplate, success: "草稿已保存在本机")
+            return true
+        }
+
         do {
             let work = try await persistCurrentWork(for: selectedTemplate)
             activeWorkId = work.id
             try await syncCurrentAssets(to: work.id)
+            removeActiveLocalDraft()
             await loadWorks()
             successMessage = "作品已保存"
             return true
@@ -130,10 +164,6 @@ public final class CardifyViewModel: ObservableObject {
     }
 
     public func saveCurrentWorkExport(imageData: Data, filename: String) async -> Bool {
-        guard currentUser != nil else {
-            errorMessage = "请先通过 Apple 登录后再导出作品"
-            return false
-        }
         guard let selectedTemplate else {
             errorMessage = "请先选择模板"
             return false
@@ -143,6 +173,11 @@ public final class CardifyViewModel: ObservableObject {
         errorMessage = nil
         successMessage = nil
         defer { isSaving = false }
+
+        guard currentUser != nil else {
+            saveLocalDraft(for: selectedTemplate, success: "图片已导出，草稿已保存在本机")
+            return true
+        }
 
         do {
             let workId: String
@@ -156,6 +191,7 @@ public final class CardifyViewModel: ObservableObject {
             }
             try await syncCurrentAssets(to: workId)
             _ = try await apiClient.saveWorkExport(workId: workId, filename: filename, imageData: imageData)
+            removeActiveLocalDraft()
             await loadWorks()
             successMessage = "图片已导出并同步"
             return true
@@ -166,15 +202,11 @@ public final class CardifyViewModel: ObservableObject {
     }
 
     private func workPayload(for template: TemplateSummary) -> WorkCreateRequest {
-        var renderParams = generatedContent.renderParams
-        renderParams["canvas_size_id"] = .string(selectedCanvasSizeId)
-        renderParams["schema_version"] = .string(template.schema.schemaVersion)
-
         return WorkCreateRequest(
             templateId: template.id,
             title: generatedContent.title,
             inputText: inputText.isEmpty ? generatedContent.summary : inputText,
-            renderParams: renderParams
+            renderParams: renderParams(for: template)
         )
     }
 
@@ -199,8 +231,16 @@ public final class CardifyViewModel: ObservableObject {
             currentUser = session.user
             apiClient.accessToken = session.accessToken
             LoginSessionStore.save(session)
+            let pendingDraftCount = localDrafts.count
+            let syncedDraftCount = await syncLocalDrafts()
             await loadWorks()
-            successMessage = "已通过 Apple 登录"
+            if syncedDraftCount > 0 {
+                successMessage = "已登录，已同步 \(syncedDraftCount) 个本机草稿"
+            } else if pendingDraftCount > 0 {
+                successMessage = "已登录，本机草稿仍保留在本机，请稍后重新登录同步"
+            } else {
+                successMessage = "已通过 Apple 登录"
+            }
             return true
         } catch {
             errorMessage = "登录失败，请稍后重试"
@@ -216,6 +256,7 @@ public final class CardifyViewModel: ObservableObject {
         currentUser = nil
         works = []
         activeWorkId = nil
+        activeDraftId = nil
         apiClient.accessToken = nil
         LoginSessionStore.clear()
         successMessage = "已退出登录"
@@ -236,6 +277,7 @@ public final class CardifyViewModel: ObservableObject {
         )
         inputText = work.inputText
         activeWorkId = work.id
+        activeDraftId = nil
         await restoreAssets(for: work)
         successMessage = "已打开作品"
         return true
@@ -258,11 +300,108 @@ public final class CardifyViewModel: ObservableObject {
         }
     }
 
+    public func reopenLocalDraft(_ draft: LocalDraftRecord) -> Bool {
+        guard let template = templates.first(where: { $0.id == draft.templateId }) else {
+            errorMessage = "模板已不可用，暂时无法打开该草稿"
+            return false
+        }
+
+        selectedTemplate = template
+        selectedCanvasSizeId = draft.renderParams.string("canvas_size_id", default: template.defaultSizeId)
+        generatedContent = CardContent(
+            renderParams: draft.renderParams,
+            fallbackTitle: "未命名草稿",
+            fallbackSummary: draft.inputText
+        )
+        generatedContent.coverImageData = draft.coverImageData
+        generatedContent.avatarImageData = draft.avatarImageData
+        inputText = draft.inputText
+        activeWorkId = nil
+        activeDraftId = draft.id
+        successMessage = "已打开本机草稿"
+        return true
+    }
+
+    public func deleteLocalDraft(_ draft: LocalDraftRecord) {
+        localDrafts.removeAll { $0.id == draft.id }
+        if activeDraftId == draft.id {
+            activeDraftId = nil
+        }
+        LocalDraftStore.save(localDrafts)
+        successMessage = "本机草稿已删除"
+    }
+
     private func persistCurrentWork(for template: TemplateSummary) async throws -> WorkRecord {
         if let activeWorkId {
             return try await apiClient.updateWork(id: activeWorkId, payload: workPayload(for: template))
         }
         return try await apiClient.createWork(workPayload(for: template))
+    }
+
+    private func saveLocalDraft(for template: TemplateSummary, success: String) {
+        let now = Date()
+        let existing = localDrafts.first { $0.id == activeDraftId }
+        let draft = LocalDraftRecord(
+            id: existing?.id ?? UUID().uuidString,
+            templateId: template.id,
+            inputText: inputText.isEmpty ? generatedContent.summary : inputText,
+            renderParams: renderParams(for: template),
+            coverImageData: generatedContent.coverImageData,
+            avatarImageData: generatedContent.avatarImageData,
+            createdAt: existing?.createdAt ?? now,
+            updatedAt: now
+        )
+        activeDraftId = draft.id
+        localDrafts.removeAll { $0.id == draft.id }
+        localDrafts.insert(draft, at: 0)
+        LocalDraftStore.save(localDrafts)
+        successMessage = success
+    }
+
+    private func removeActiveLocalDraft() {
+        guard let activeDraftId else { return }
+        localDrafts.removeAll { $0.id == activeDraftId }
+        self.activeDraftId = nil
+        LocalDraftStore.save(localDrafts)
+    }
+
+    private func renderParams(for template: TemplateSummary) -> [String: JSONValue] {
+        var renderParams = generatedContent.renderParams
+        renderParams["canvas_size_id"] = .string(selectedCanvasSizeId)
+        renderParams["schema_version"] = .string(template.schema.schemaVersion)
+        return renderParams
+    }
+
+    private func syncLocalDrafts() async -> Int {
+        guard currentUser != nil else { return 0 }
+        var syncedDraftIDs: Set<String> = []
+
+        for draft in localDrafts {
+            let content = CardContent(
+                renderParams: draft.renderParams,
+                fallbackTitle: "未命名草稿",
+                fallbackSummary: draft.inputText
+            )
+            let payload = WorkCreateRequest(
+                templateId: draft.templateId,
+                title: content.title,
+                inputText: draft.inputText,
+                renderParams: draft.renderParams
+            )
+
+            do {
+                let work = try await apiClient.createWork(payload)
+                try await syncDraftAssets(draft, to: work.id)
+                syncedDraftIDs.insert(draft.id)
+            } catch {
+                continue
+            }
+        }
+
+        guard !syncedDraftIDs.isEmpty else { return 0 }
+        localDrafts.removeAll { syncedDraftIDs.contains($0.id) }
+        LocalDraftStore.save(localDrafts)
+        return syncedDraftIDs.count
     }
 
     private func syncCurrentAssets(to workId: String) async throws {
@@ -278,6 +417,11 @@ public final class CardifyViewModel: ObservableObject {
             workId: workId,
             filename: "avatar.jpg"
         )
+    }
+
+    private func syncDraftAssets(_ draft: LocalDraftRecord, to workId: String) async throws {
+        try await syncAsset(kind: .cover, imageData: draft.coverImageData, workId: workId, filename: "cover.jpg")
+        try await syncAsset(kind: .avatar, imageData: draft.avatarImageData, workId: workId, filename: "avatar.jpg")
     }
 
     private func syncAsset(
@@ -315,6 +459,39 @@ public final class CardifyViewModel: ObservableObject {
             task = try await apiClient.getGeneration(id: task.id)
         }
         return task
+    }
+}
+
+private enum LocalDraftStore {
+    private static let directoryName = "Cardify"
+    private static let fileName = "local-drafts.json"
+
+    static func load() -> [LocalDraftRecord] {
+        guard let data = try? Data(contentsOf: fileURL),
+              let drafts = try? JSONDecoder().decode([LocalDraftRecord].self, from: data) else {
+            return []
+        }
+        return drafts.sorted { $0.updatedAt > $1.updatedAt }
+    }
+
+    static func save(_ drafts: [LocalDraftRecord]) {
+        do {
+            let directory = fileURL.deletingLastPathComponent()
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let data = try JSONEncoder().encode(drafts)
+            try data.write(to: fileURL, options: .atomic)
+            try FileManager.default.setAttributes(
+                [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication],
+                ofItemAtPath: fileURL.path
+            )
+        } catch {
+            return
+        }
+    }
+
+    private static var fileURL: URL {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        return base.appendingPathComponent(directoryName, isDirectory: true).appendingPathComponent(fileName)
     }
 }
 

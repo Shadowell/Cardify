@@ -149,6 +149,37 @@ public struct WorkRecord: Codable, Identifiable, Sendable {
     }
 }
 
+public struct LocalDraftRecord: Codable, Identifiable, Sendable {
+    public let id: String
+    public let templateId: String
+    public let inputText: String
+    public let renderParams: [String: JSONValue]
+    public let coverImageData: Data?
+    public let avatarImageData: Data?
+    public let createdAt: Date
+    public let updatedAt: Date
+
+    public init(
+        id: String,
+        templateId: String,
+        inputText: String,
+        renderParams: [String: JSONValue],
+        coverImageData: Data?,
+        avatarImageData: Data?,
+        createdAt: Date,
+        updatedAt: Date
+    ) {
+        self.id = id
+        self.templateId = templateId
+        self.inputText = inputText
+        self.renderParams = renderParams
+        self.coverImageData = coverImageData
+        self.avatarImageData = avatarImageData
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
+}
+
 public struct WorkListResponse: Codable, Sendable {
     public let items: [WorkRecord]
 }

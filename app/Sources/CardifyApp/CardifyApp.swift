@@ -66,6 +66,7 @@ private struct RootView: View {
         }
         .task {
             await viewModel.loadTemplates()
+            await viewModel.syncLocalDraftsNow(showEmptyState: false)
             await viewModel.loadWorks()
         }
     }
@@ -111,12 +112,6 @@ private enum AppTab: Hashable, CaseIterable, Identifiable {
 private enum CreationMode {
     case input
     case editing
-}
-
-private enum EditorAction {
-    case save
-    case saveToPhotoLibrary
-    case share
 }
 
 private struct CreationFlowView: View {
@@ -617,8 +612,6 @@ private struct EditorView: View {
     @EnvironmentObject private var viewModel: CardifyViewModel
     let onBackToInput: () -> Void
     @State private var isCanvasSizePickerPresented = false
-    @State private var isSignInPresented = false
-    @State private var pendingAction: EditorAction?
     #if canImport(PhotosUI)
     @State private var selectedCoverPhoto: PhotosPickerItem?
     @State private var selectedAvatarPhoto: PhotosPickerItem?
@@ -832,10 +825,10 @@ private struct EditorView: View {
                     #endif
 
                     Button {
-                        request(.save, template: template)
+                        Task { _ = await viewModel.saveCurrentWork() }
                     } label: {
                         Label(
-                            viewModel.isSaving ? "保存中" : (viewModel.currentUser == nil ? "登录以保存" : "保存作品"),
+                            viewModel.isSaving ? "保存中" : (viewModel.currentUser == nil ? "保存草稿" : "保存作品"),
                             systemImage: "tray.and.arrow.down"
                         )
                             .frame(maxWidth: .infinity)
@@ -848,7 +841,7 @@ private struct EditorView: View {
                     #if canImport(UIKit)
                     HStack(spacing: 12) {
                         Button {
-                            request(.saveToPhotoLibrary, template: template)
+                            Task { await export(template: template, saveToPhotoLibrary: true) }
                         } label: {
                             Label(isExporting ? "导出中" : "保存相册", systemImage: "square.and.arrow.down")
                                 .frame(maxWidth: .infinity)
@@ -857,7 +850,7 @@ private struct EditorView: View {
                         .disabled(isExporting)
 
                         Button {
-                            request(.share, template: template)
+                            Task { await export(template: template, saveToPhotoLibrary: false) }
                         } label: {
                             Label("系统分享", systemImage: "square.and.arrow.up")
                                 .frame(maxWidth: .infinity)
@@ -903,17 +896,6 @@ private struct EditorView: View {
                 }
             }
             .scrollDismissesKeyboard(.interactively)
-            .onChange(of: viewModel.currentUser?.id) { _, userId in
-                guard userId != nil,
-                      let action = pendingAction,
-                      let template = viewModel.selectedTemplate else { return }
-                pendingAction = nil
-                isSignInPresented = false
-                execute(action, template: template)
-            }
-            .sheet(isPresented: $isSignInPresented) {
-                AccountSignInSheet()
-            }
             .navigationTitle("预览与编辑")
             .cardifyInlineNavigationTitle()
             .toolbar {
@@ -965,28 +947,6 @@ private struct EditorView: View {
     #endif
 
     #if canImport(UIKit)
-    private func request(_ action: EditorAction, template: TemplateSummary) {
-        guard viewModel.currentUser != nil else {
-            pendingAction = action
-            isSignInPresented = true
-            return
-        }
-        execute(action, template: template)
-    }
-
-    private func execute(_ action: EditorAction, template: TemplateSummary) {
-        Task {
-            switch action {
-            case .save:
-                _ = await viewModel.saveCurrentWork()
-            case .saveToPhotoLibrary:
-                await export(template: template, saveToPhotoLibrary: true)
-            case .share:
-                await export(template: template, saveToPhotoLibrary: false)
-            }
-        }
-    }
-
     @MainActor
     private func export(template: TemplateSummary, saveToPhotoLibrary: Bool) async {
         guard let image = CardImageRenderer.render(
@@ -1171,18 +1131,60 @@ private struct WorksView: View {
     var body: some View {
         NavigationStack {
             List {
+                if !viewModel.localDrafts.isEmpty {
+                    Section("本机草稿") {
+                        ForEach(viewModel.localDrafts) { draft in
+                            Button {
+                                if viewModel.reopenLocalDraft(draft) {
+                                    onOpenWork()
+                                }
+                            } label: {
+                                LocalDraftRow(
+                                    draft: draft,
+                                    template: viewModel.templates.first(where: { $0.id == draft.templateId })
+                                )
+                            }
+                            .buttonStyle(.plain)
+                            .swipeActions {
+                                Button(role: .destructive) {
+                                    viewModel.deleteLocalDraft(draft)
+                                } label: {
+                                    Label("删除", systemImage: "trash")
+                                }
+                            }
+                        }
+                    }
+
+                    if viewModel.currentUser != nil {
+                        Section {
+                            Button("同步本机草稿", systemImage: "arrow.triangle.2.circlepath") {
+                                Task { await viewModel.syncLocalDraftsNow() }
+                            }
+                            .disabled(viewModel.isSaving)
+                        } footer: {
+                            Text("同步后会保存到你的账户，并可在其他已登录设备继续创作。")
+                        }
+                    }
+                }
+
                 if viewModel.currentUser == nil {
-                    ContentUnavailableView {
-                        Label("登录后查看作品", systemImage: "person.crop.circle.badge.plus")
-                    } description: {
-                        Text("作品会同步到你的账户，可在任意已登录设备继续编辑")
-                    } actions: {
+                    if viewModel.localDrafts.isEmpty {
+                        ContentUnavailableView(
+                            "还没有本机草稿",
+                            systemImage: "rectangle.stack.badge.plus",
+                            description: Text("保存草稿后，可在这里继续编辑或登录后同步")
+                        )
+                        .listRowBackground(Color.clear)
+                    }
+
+                    Section {
                         Button("通过 Apple 登录") {
                             isSignInPresented = true
                         }
                         .buttonStyle(.borderedProminent)
+                    } footer: {
+                        Text("登录后会自动同步本机草稿，并可在其他已登录设备继续创作。")
                     }
-                    .listRowBackground(Color.clear)
                 } else if viewModel.works.isEmpty {
                     ContentUnavailableView(
                         "还没有作品",
@@ -1244,7 +1246,7 @@ private struct AccountSignInSheet: View {
                 Text("登录后同步作品")
                     .font(.title2.weight(.bold))
                     .foregroundStyle(Color.cardifyInk)
-                Text("作品、编辑内容和导出文件会归属到你的账户，方便继续创作与管理。")
+                Text("本机草稿会在登录后同步到你的账户，方便继续创作与管理。")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                 AppleSignInControl()
@@ -1365,6 +1367,41 @@ private struct WorkRow: View {
                     .foregroundStyle(Color.cardifyInk)
                     .lineLimit(2)
                 Text(template?.name ?? work.templateId)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+private struct LocalDraftRow: View {
+    let draft: LocalDraftRecord
+    let template: TemplateSummary?
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "doc.text")
+                .font(.title3)
+                .foregroundStyle(Color.cardifyMuted)
+                .frame(width: 30, height: 30)
+                .background(Color.cardifySky, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(CardContent(
+                    renderParams: draft.renderParams,
+                    fallbackTitle: "未命名草稿",
+                    fallbackSummary: draft.inputText
+                ).title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Color.cardifyInk)
+                .lineLimit(2)
+                Text(template?.name ?? "已保存草稿")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
