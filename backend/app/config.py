@@ -27,6 +27,7 @@ class Settings(BaseSettings):
         alias="APP_STORE_PRODUCT_IDS",
     )
     allow_local_storekit_testing: bool = Field(default=False, alias="ALLOW_LOCAL_STOREKIT_TESTING")
+    legal_contact_email: str = Field(default="support@notenap.com", alias="LEGAL_CONTACT_EMAIL")
     cors_origins: list[str] = Field(default_factory=lambda: ["http://127.0.0.1:5173"])
 
     model_config = SettingsConfigDict(

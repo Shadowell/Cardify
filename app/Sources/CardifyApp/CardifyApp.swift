@@ -1766,6 +1766,8 @@ private struct AccountSignInSheet: View {
 
 private struct ProfileView: View {
     @EnvironmentObject private var viewModel: CardifyViewModel
+    @Environment(\.openURL) private var openURL
+    @State private var isDeleteAccountConfirmationPresented = false
 
     var body: some View {
         NavigationStack {
@@ -1833,11 +1835,58 @@ private struct ProfileView: View {
                             .foregroundStyle(.orange)
                             .fixedSize(horizontal: false, vertical: true)
                     }
+
+                    Text("订阅价格与周期以 App Store 购买页面为准。订阅会自动续期，除非在当前周期结束前至少 24 小时取消。")
+                        .font(.footnote)
+                        .foregroundStyle(Color.cardifyMuted)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Button("管理订阅", systemImage: "arrow.up.right.square") {
+                        openURL(AppLegal.manageSubscriptionsURL)
+                    }
+                    .tint(Color.cardifyNavActive)
+                }
+
+                if viewModel.currentUser != nil {
+                    Section("账户管理") {
+                        Button("删除账户", systemImage: "trash", role: .destructive) {
+                            isDeleteAccountConfirmationPresented = true
+                        }
+                        .disabled(viewModel.isDeletingAccount)
+
+                        Text("删除后会永久移除云端账户、作品和图片。本机未同步草稿会保留在当前设备。")
+                            .font(.footnote)
+                            .foregroundStyle(Color.cardifyMuted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+
+                Section("法律与支持") {
+                    Link(destination: AppLegal.privacyPolicyURL) {
+                        Label("隐私政策", systemImage: "hand.raised")
+                    }
+                    Link(destination: AppLegal.termsOfServiceURL) {
+                        Label("服务条款", systemImage: "doc.text")
+                    }
                 }
             }
             .navigationTitle("我的")
+            .alert("确认删除账户？", isPresented: $isDeleteAccountConfirmationPresented) {
+                Button("删除账户", role: .destructive) {
+                    Task { await viewModel.deleteAccount() }
+                }
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text("云端作品、图片和账户资料将永久删除，无法恢复。Apple 订阅不会随账户删除而取消，请先在 App Store 管理订阅。")
+            }
         }
     }
+}
+
+private enum AppLegal {
+    static let privacyPolicyURL = URL(string: "https://www.cardify.notenap.com/legal/privacy")!
+    static let termsOfServiceURL = URL(string: "https://www.cardify.notenap.com/legal/terms")!
+    static let manageSubscriptionsURL = URL(string: "https://apps.apple.com/account/subscriptions")!
 }
 
 private struct MembershipStatusRow: View {

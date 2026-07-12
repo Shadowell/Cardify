@@ -266,3 +266,47 @@ def test_subscription_rejects_a_transaction_bound_to_another_user(client, authen
 def test_work_endpoints_require_an_authenticated_session(client):
     response = client.get("/works")
     assert response.status_code == 401
+
+
+def test_account_deletion_removes_cloud_data_and_invalidates_session(client, authenticated_session, tmp_path):
+    headers = authenticated_session["headers"]
+    user_id = authenticated_session["user_id"]
+    image_payload = base64.b64encode(b"account-owned-image").decode("ascii")
+    created = client.post(
+        "/works",
+        json={
+            "template_id": "knowledge-note",
+            "title": "待删除的作品",
+            "input_text": "账户删除测试内容。",
+            "render_params": {},
+        },
+        headers=headers,
+    )
+    assert created.status_code == 201
+    work_id = created.json()["id"]
+    assert client.post(
+        f"/works/{work_id}/export",
+        json={"filename": "account.png", "image_base64": image_payload},
+        headers=headers,
+    ).status_code == 200
+    assert client.post(
+        f"/works/{work_id}/assets",
+        json={"kind": "cover", "filename": "cover.jpg", "image_base64": image_payload},
+        headers=headers,
+    ).status_code == 200
+
+    deleted = client.delete("/auth/me", headers=headers)
+    assert deleted.status_code == 200
+    assert deleted.json() == {"deleted": user_id}
+    assert client.get("/works", headers=headers).status_code == 401
+    assert not (tmp_path / "storage" / f"works-{work_id}").exists()
+
+
+def test_legal_pages_are_public(client):
+    privacy = client.get("/legal/privacy")
+    terms = client.get("/legal/terms")
+
+    assert privacy.status_code == 200
+    assert "隐私政策" in privacy.text
+    assert terms.status_code == 200
+    assert "服务条款" in terms.text

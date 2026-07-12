@@ -137,6 +137,10 @@ public struct APIClient: Sendable {
         let _: EmptyResponse = try await request(path: "/works/\(id)", method: "DELETE")
     }
 
+    public func deleteCurrentAccount() async throws {
+        let _: EmptyResponse = try await request(path: "/auth/me", method: "DELETE")
+    }
+
     private func request<Response: Decodable>(path: String, method: String = "GET") async throws -> Response {
         var request = URLRequest(url: url(for: path))
         request.httpMethod = method

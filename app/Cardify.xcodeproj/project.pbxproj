@@ -14,6 +14,7 @@
 		B00000000000000000000105 /* TemplateCanvasView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000205 /* TemplateCanvasView.swift */; };
 		B00000000000000000000106 /* CardifyViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000206 /* CardifyViewModel.swift */; };
 		B00000000000000000000107 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000207 /* Assets.xcassets */; };
+		B00000000000000000000108 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000211 /* PrivacyInfo.xcprivacy */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -27,6 +28,7 @@
 		B00000000000000000000208 /* Cardify.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Cardify.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		B00000000000000000000209 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Cardify/Info.plist; sourceTree = "<group>"; };
 		B00000000000000000000210 /* Cardify.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Cardify/Cardify.entitlements; sourceTree = "<group>"; };
+		B00000000000000000000211 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Cardify/PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		BC7261E5300370FE00E7D46F /* CardifyProducts.storekit */ = {isa = PBXFileReference; lastKnownFileType = text; path = CardifyProducts.storekit; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -50,6 +52,7 @@
 				B00000000000000000000207 /* Assets.xcassets */,
 				B00000000000000000000209 /* Info.plist */,
 				B00000000000000000000210 /* Cardify.entitlements */,
+				B00000000000000000000211 /* PrivacyInfo.xcprivacy */,
 				B00000000000000000000404 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -142,6 +145,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				B00000000000000000000107 /* Assets.xcassets in Resources */,
+				B00000000000000000000108 /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -286,6 +290,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
 				CODE_SIGN_ENTITLEMENTS = Cardify/Cardify.entitlements;
 				CURRENT_PROJECT_VERSION = 1;
@@ -298,7 +303,7 @@
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "保存导出的卡片到相册。";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "选择图片用于卡片创作。";
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 0.1.0;
+				MARKETING_VERSION = 1.0.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.jiefeng.cardify;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
@@ -314,6 +319,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
 				CODE_SIGN_ENTITLEMENTS = Cardify/Cardify.entitlements;
 				CURRENT_PROJECT_VERSION = 1;
@@ -326,7 +332,7 @@
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "保存导出的卡片到相册。";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "选择图片用于卡片创作。";
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 0.1.0;
+				MARKETING_VERSION = 1.0.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.jiefeng.cardify;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";

@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import get_settings
 from .database import SessionLocal, init_db
-from .routers import auth, generations, subscriptions, templates, works
+from .routers import auth, generations, legal, subscriptions, templates, works
 from .services.templates import seed_templates
 
 
@@ -37,6 +37,7 @@ def create_app() -> FastAPI:
     app.include_router(generations.router)
     app.include_router(works.router)
     app.include_router(subscriptions.router)
+    app.include_router(legal.router)
 
     @app.get("/health")
     def health() -> dict[str, str]:

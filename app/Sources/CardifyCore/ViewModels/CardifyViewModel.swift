@@ -25,6 +25,7 @@ public final class CardifyViewModel: ObservableObject {
     @Published public private(set) var isLoading = false
     @Published public private(set) var isSaving = false
     @Published public private(set) var isAuthenticating = false
+    @Published public private(set) var isDeletingAccount = false
     @Published public private(set) var subscriptionProducts: [Product] = []
     @Published public private(set) var membershipStatus: MembershipStatus = .none
     @Published public private(set) var isMembershipLoading = false
@@ -389,18 +390,25 @@ public final class CardifyViewModel: ObservableObject {
     }
 
     public func signOut() {
-        currentUser = nil
-        works = []
-        worksTotal = 0
-        hasMoreWorks = false
-        worksErrorMessage = nil
-        activeWorkId = nil
-        activeDraftId = nil
-        apiClient.accessToken = nil
-        membershipStatus = .none
-        membershipErrorMessage = nil
-        LoginSessionStore.clear()
+        clearAuthenticatedState()
         successMessage = "已退出登录"
+    }
+
+    public func deleteAccount() async {
+        guard currentUser != nil else { return }
+
+        isDeletingAccount = true
+        errorMessage = nil
+        successMessage = nil
+        defer { isDeletingAccount = false }
+
+        do {
+            try await apiClient.deleteCurrentAccount()
+            clearAuthenticatedState()
+            successMessage = "账户和云端作品已删除"
+        } catch {
+            errorMessage = "删除账户失败，请稍后重试"
+        }
     }
 
     public func reopenWork(_ work: WorkRecord) async -> Bool {
@@ -479,6 +487,21 @@ public final class CardifyViewModel: ObservableObject {
             return try await apiClient.updateWork(id: activeWorkId, payload: workPayload(for: template))
         }
         return try await apiClient.createWork(workPayload(for: template))
+    }
+
+    private func clearAuthenticatedState() {
+        currentUser = nil
+        works = []
+        worksTotal = 0
+        hasMoreWorks = false
+        worksErrorMessage = nil
+        activeWorkId = nil
+        activeDraftId = nil
+        apiClient.accessToken = nil
+        subscriptionProducts = []
+        membershipStatus = .none
+        membershipErrorMessage = nil
+        LoginSessionStore.clear()
     }
 
     private func saveLocalDraft(for template: TemplateSummary, success: String) {
