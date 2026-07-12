@@ -1,11 +1,14 @@
+import mimetypes
+
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..config import get_settings
 from ..database import get_db
 from ..models import User, Work
-from ..schemas import ExportImageCreate, WorkCreate, WorkListOut, WorkOut, WorkUpdate
+from ..schemas import ExportImageCreate, WorkAssetCreate, WorkCreate, WorkListOut, WorkOut, WorkUpdate
 from ..services.session_auth import get_current_user
 from ..services.storage import StorageError, StorageService
 
@@ -47,7 +50,11 @@ def update_work(work_id: str, payload: WorkUpdate, current_user: User = Depends(
     work.template_id = payload.template_id
     work.title = payload.title
     work.input_text = payload.input_text
-    work.render_params = payload.render_params
+    render_params = dict(payload.render_params)
+    existing_assets = work.render_params.get("assets")
+    if isinstance(existing_assets, dict):
+        render_params["assets"] = existing_assets
+    work.render_params = render_params
     db.commit()
     db.refresh(work)
     return work
@@ -68,12 +75,97 @@ def save_work_export(work_id: str, payload: ExportImageCreate, current_user: Use
     return work
 
 
+def _asset_path(work: Work, asset_kind: str) -> str:
+    assets = work.render_params.get("assets", {})
+    relative_path = assets.get(asset_kind) if isinstance(assets, dict) else None
+    expected_prefix = f"works-{work.id}/asset-{asset_kind}-"
+    if not isinstance(relative_path, str) or not relative_path.startswith(expected_prefix):
+        raise HTTPException(status_code=404, detail="work asset not found")
+    return relative_path
+
+
+@router.post("/{work_id}/assets", response_model=WorkOut)
+def save_work_asset(
+    work_id: str,
+    payload: WorkAssetCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> Work:
+    work = get_owned_work(work_id, current_user, db)
+    storage = StorageService(get_settings().resolved_storage_root)
+    try:
+        relative_path = storage.save_base64_image(
+            f"works/{work.id}",
+            f"asset-{payload.kind}-{payload.filename}",
+            payload.image_base64,
+        )
+    except StorageError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    render_params = dict(work.render_params)
+    existing_assets = render_params.get("assets")
+    assets = dict(existing_assets) if isinstance(existing_assets, dict) else {}
+    previous_path = assets.get(payload.kind)
+    assets[payload.kind] = relative_path
+    render_params["assets"] = assets
+    work.render_params = render_params
+    if isinstance(previous_path, str) and previous_path != relative_path:
+        storage.delete(previous_path)
+    db.commit()
+    db.refresh(work)
+    return work
+
+
+@router.get("/{work_id}/assets/{asset_kind}")
+def get_work_asset(
+    work_id: str,
+    asset_kind: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> FileResponse:
+    if asset_kind not in {"cover", "avatar"}:
+        raise HTTPException(status_code=404, detail="work asset not found")
+    work = get_owned_work(work_id, current_user, db)
+    try:
+        path = StorageService(get_settings().resolved_storage_root).resolve_file(_asset_path(work, asset_kind))
+    except StorageError as exc:
+        raise HTTPException(status_code=404, detail="work asset not found") from exc
+    media_type, _ = mimetypes.guess_type(path.name)
+    return FileResponse(path, media_type=media_type or "application/octet-stream")
+
+
+@router.delete("/{work_id}/assets/{asset_kind}")
+def delete_work_asset(
+    work_id: str,
+    asset_kind: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict[str, str]:
+    if asset_kind not in {"cover", "avatar"}:
+        raise HTTPException(status_code=404, detail="work asset not found")
+    work = get_owned_work(work_id, current_user, db)
+    try:
+        relative_path = _asset_path(work, asset_kind)
+    except HTTPException:
+        return {"deleted": asset_kind}
+
+    storage = StorageService(get_settings().resolved_storage_root)
+    storage.delete(relative_path)
+    render_params = dict(work.render_params)
+    existing_assets = render_params.get("assets")
+    assets = dict(existing_assets) if isinstance(existing_assets, dict) else {}
+    assets.pop(asset_kind, None)
+    render_params["assets"] = assets
+    work.render_params = render_params
+    db.commit()
+    return {"deleted": asset_kind}
+
+
 @router.delete("/{work_id}")
 def delete_work(work_id: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> dict[str, str]:
     work = get_owned_work(work_id, current_user, db)
 
-    if work.export_path:
-        StorageService(get_settings().resolved_storage_root).delete(work.export_path)
+    StorageService(get_settings().resolved_storage_root).delete_tree(f"works/{work.id}")
 
     db.delete(work)
     db.commit()

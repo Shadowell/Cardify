@@ -113,6 +113,12 @@ private enum CreationMode {
     case editing
 }
 
+private enum EditorAction {
+    case save
+    case saveToPhotoLibrary
+    case share
+}
+
 private struct CreationFlowView: View {
     @Binding var mode: CreationMode
 
@@ -611,6 +617,8 @@ private struct EditorView: View {
     @EnvironmentObject private var viewModel: CardifyViewModel
     let onBackToInput: () -> Void
     @State private var isCanvasSizePickerPresented = false
+    @State private var isSignInPresented = false
+    @State private var pendingAction: EditorAction?
     #if canImport(PhotosUI)
     @State private var selectedCoverPhoto: PhotosPickerItem?
     @State private var selectedAvatarPhoto: PhotosPickerItem?
@@ -824,38 +832,38 @@ private struct EditorView: View {
                     #endif
 
                     Button {
-                        Task { await viewModel.saveCurrentWork() }
+                        request(.save, template: template)
                     } label: {
                         Label(
-                            viewModel.isSaving ? "保存中" : (viewModel.currentUser == nil ? "登录后保存" : "保存作品"),
+                            viewModel.isSaving ? "保存中" : (viewModel.currentUser == nil ? "登录以保存" : "保存作品"),
                             systemImage: "tray.and.arrow.down"
                         )
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.bordered)
-                    .disabled(viewModel.isSaving || viewModel.currentUser == nil)
+                    .disabled(viewModel.isSaving)
                     .padding(.horizontal)
                     .padding(.top, 10)
 
                     #if canImport(UIKit)
                     HStack(spacing: 12) {
                         Button {
-                            Task { await export(template: template, saveToPhotoLibrary: true) }
+                            request(.saveToPhotoLibrary, template: template)
                         } label: {
                             Label(isExporting ? "导出中" : "保存相册", systemImage: "square.and.arrow.down")
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.borderedProminent)
-                        .disabled(isExporting || viewModel.currentUser == nil)
+                        .disabled(isExporting)
 
                         Button {
-                            Task { await export(template: template, saveToPhotoLibrary: false) }
+                            request(.share, template: template)
                         } label: {
                             Label("系统分享", systemImage: "square.and.arrow.up")
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.bordered)
-                        .disabled(isExporting || viewModel.currentUser == nil)
+                        .disabled(isExporting)
                     }
                     .padding(.horizontal)
                     .padding(.top, 8)
@@ -895,6 +903,17 @@ private struct EditorView: View {
                 }
             }
             .scrollDismissesKeyboard(.interactively)
+            .onChange(of: viewModel.currentUser?.id) { _, userId in
+                guard userId != nil,
+                      let action = pendingAction,
+                      let template = viewModel.selectedTemplate else { return }
+                pendingAction = nil
+                isSignInPresented = false
+                execute(action, template: template)
+            }
+            .sheet(isPresented: $isSignInPresented) {
+                AccountSignInSheet()
+            }
             .navigationTitle("预览与编辑")
             .cardifyInlineNavigationTitle()
             .toolbar {
@@ -946,6 +965,28 @@ private struct EditorView: View {
     #endif
 
     #if canImport(UIKit)
+    private func request(_ action: EditorAction, template: TemplateSummary) {
+        guard viewModel.currentUser != nil else {
+            pendingAction = action
+            isSignInPresented = true
+            return
+        }
+        execute(action, template: template)
+    }
+
+    private func execute(_ action: EditorAction, template: TemplateSummary) {
+        Task {
+            switch action {
+            case .save:
+                _ = await viewModel.saveCurrentWork()
+            case .saveToPhotoLibrary:
+                await export(template: template, saveToPhotoLibrary: true)
+            case .share:
+                await export(template: template, saveToPhotoLibrary: false)
+            }
+        }
+    }
+
     @MainActor
     private func export(template: TemplateSummary, saveToPhotoLibrary: Bool) async {
         guard let image = CardImageRenderer.render(
@@ -967,7 +1008,12 @@ private struct EditorView: View {
             }
 
             let filename = "cardify-\(template.id)-\(viewModel.selectedCanvasSizeId).png"
-            _ = await viewModel.saveCurrentWorkExport(imageData: imageData, filename: filename)
+            let synced = await viewModel.saveCurrentWorkExport(imageData: imageData, filename: filename)
+            if !synced {
+                exportError = saveToPhotoLibrary
+                    ? "图片已保存到相册，但作品同步失败，请稍后重试"
+                    : "图片可以分享，但作品同步失败，请稍后重试"
+            }
 
             if !saveToPhotoLibrary {
                 exportedImage = image
@@ -1120,11 +1166,24 @@ private struct SystemShareSheet: UIViewControllerRepresentable {
 private struct WorksView: View {
     @EnvironmentObject private var viewModel: CardifyViewModel
     let onOpenWork: () -> Void
+    @State private var isSignInPresented = false
 
     var body: some View {
         NavigationStack {
             List {
-                if viewModel.works.isEmpty {
+                if viewModel.currentUser == nil {
+                    ContentUnavailableView {
+                        Label("登录后查看作品", systemImage: "person.crop.circle.badge.plus")
+                    } description: {
+                        Text("作品会同步到你的账户，可在任意已登录设备继续编辑")
+                    } actions: {
+                        Button("通过 Apple 登录") {
+                            isSignInPresented = true
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                    .listRowBackground(Color.clear)
+                } else if viewModel.works.isEmpty {
                     ContentUnavailableView(
                         "还没有作品",
                         systemImage: "rectangle.stack.badge.plus",
@@ -1134,8 +1193,10 @@ private struct WorksView: View {
                 } else {
                     ForEach(viewModel.works) { work in
                         Button {
-                            if viewModel.reopenWork(work) {
-                                onOpenWork()
+                            Task {
+                                if await viewModel.reopenWork(work) {
+                                    onOpenWork()
+                                }
                             }
                         } label: {
                             WorkRow(work: work, template: viewModel.templates.first(where: { $0.id == work.templateId }))
@@ -1162,6 +1223,45 @@ private struct WorksView: View {
             }
             .task {
                 await viewModel.loadWorks()
+            }
+            .sheet(isPresented: $isSignInPresented) {
+                AccountSignInSheet()
+            }
+        }
+    }
+}
+
+private struct AccountSignInSheet: View {
+    @EnvironmentObject private var viewModel: CardifyViewModel
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 20) {
+                Image(systemName: "person.crop.circle.badge.checkmark")
+                    .font(.system(size: 44, weight: .medium))
+                    .foregroundStyle(Color.cardifyNavActive)
+                Text("登录后同步作品")
+                    .font(.title2.weight(.bold))
+                    .foregroundStyle(Color.cardifyInk)
+                Text("作品、编辑内容和导出文件会归属到你的账户，方便继续创作与管理。")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                AppleSignInControl()
+                Spacer()
+            }
+            .padding(24)
+            .navigationTitle("账户")
+            .cardifyInlineNavigationTitle()
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("关闭") { dismiss() }
+                }
+            }
+            .onChange(of: viewModel.currentUser?.id) { _, userId in
+                if userId != nil {
+                    dismiss()
+                }
             }
         }
     }

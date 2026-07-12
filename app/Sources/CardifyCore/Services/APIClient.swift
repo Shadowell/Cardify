@@ -65,6 +65,35 @@ public struct APIClient: Sendable {
         )
     }
 
+    public func saveWorkAsset(
+        workId: String,
+        kind: WorkAssetKind,
+        filename: String,
+        imageData: Data
+    ) async throws -> WorkRecord {
+        try await request(
+            path: "/works/\(workId)/assets",
+            method: "POST",
+            body: WorkAssetRequest(
+                kind: kind,
+                filename: filename,
+                imageBase64: imageData.base64EncodedString()
+            )
+        )
+    }
+
+    public func fetchWorkAsset(workId: String, kind: WorkAssetKind) async throws -> Data {
+        var request = URLRequest(url: url(for: "/works/\(workId)/assets/\(kind.rawValue)"))
+        authorize(&request)
+        let (data, urlResponse) = try await send(request)
+        try validate(urlResponse, data: data)
+        return data
+    }
+
+    public func deleteWorkAsset(workId: String, kind: WorkAssetKind) async throws {
+        let _: EmptyResponse = try await request(path: "/works/\(workId)/assets/\(kind.rawValue)", method: "DELETE")
+    }
+
     public func updateWork(id: String, payload: WorkCreateRequest) async throws -> WorkRecord {
         try await request(path: "/works/\(id)", method: "PATCH", body: payload)
     }

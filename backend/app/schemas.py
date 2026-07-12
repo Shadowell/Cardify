@@ -105,6 +105,12 @@ class ExportImageCreate(BaseModel):
     image_base64: str = Field(min_length=1)
 
 
+class WorkAssetCreate(BaseModel):
+    kind: Literal["cover", "avatar"]
+    filename: str = Field(min_length=1, max_length=120)
+    image_base64: str = Field(min_length=1)
+
+
 class AppleLoginCreate(BaseModel):
     identity_token: str = Field(min_length=8)
     authorization_code: str | None = None

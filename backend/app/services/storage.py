@@ -47,6 +47,26 @@ class StorageService:
         if target.exists() and target.is_file():
             target.unlink()
 
+    def resolve_file(self, relative_path: str) -> Path:
+        target = (self.root / relative_path).resolve()
+        if not str(target).startswith(str(self.root)):
+            raise StorageError("invalid storage path")
+        if not target.is_file():
+            raise StorageError("stored file was not found")
+        return target
+
+    def delete_tree(self, relative_folder: str) -> None:
+        target = (self.root / self._safe_part(relative_folder)).resolve()
+        if not str(target).startswith(str(self.root)):
+            raise StorageError("invalid storage path")
+        if target.exists() and target.is_dir():
+            for child in sorted(target.rglob("*"), reverse=True):
+                if child.is_file() or child.is_symlink():
+                    child.unlink()
+                elif child.is_dir():
+                    child.rmdir()
+            target.rmdir()
+
     @staticmethod
     def _safe_part(value: str) -> str:
         safe = SAFE_NAME_RE.sub("-", value.strip()).strip(".-/")

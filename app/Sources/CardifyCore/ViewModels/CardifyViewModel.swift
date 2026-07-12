@@ -119,6 +119,7 @@ public final class CardifyViewModel: ObservableObject {
         do {
             let work = try await persistCurrentWork(for: selectedTemplate)
             activeWorkId = work.id
+            try await syncCurrentAssets(to: work.id)
             await loadWorks()
             successMessage = "作品已保存"
             return true
@@ -153,6 +154,7 @@ public final class CardifyViewModel: ObservableObject {
                 workId = work.id
                 activeWorkId = work.id
             }
+            try await syncCurrentAssets(to: workId)
             _ = try await apiClient.saveWorkExport(workId: workId, filename: filename, imageData: imageData)
             await loadWorks()
             successMessage = "图片已导出并同步"
@@ -219,7 +221,7 @@ public final class CardifyViewModel: ObservableObject {
         successMessage = "已退出登录"
     }
 
-    public func reopenWork(_ work: WorkRecord) -> Bool {
+    public func reopenWork(_ work: WorkRecord) async -> Bool {
         guard let template = templates.first(where: { $0.id == work.templateId }) else {
             errorMessage = "模板已不可用，暂时无法打开该作品"
             return false
@@ -234,6 +236,7 @@ public final class CardifyViewModel: ObservableObject {
         )
         inputText = work.inputText
         activeWorkId = work.id
+        await restoreAssets(for: work)
         successMessage = "已打开作品"
         return true
     }
@@ -260,6 +263,46 @@ public final class CardifyViewModel: ObservableObject {
             return try await apiClient.updateWork(id: activeWorkId, payload: workPayload(for: template))
         }
         return try await apiClient.createWork(workPayload(for: template))
+    }
+
+    private func syncCurrentAssets(to workId: String) async throws {
+        try await syncAsset(
+            kind: .cover,
+            imageData: generatedContent.coverImageData,
+            workId: workId,
+            filename: "cover.jpg"
+        )
+        try await syncAsset(
+            kind: .avatar,
+            imageData: generatedContent.avatarImageData,
+            workId: workId,
+            filename: "avatar.jpg"
+        )
+    }
+
+    private func syncAsset(
+        kind: WorkAssetKind,
+        imageData: Data?,
+        workId: String,
+        filename: String
+    ) async throws {
+        if let imageData {
+            _ = try await apiClient.saveWorkAsset(
+                workId: workId,
+                kind: kind,
+                filename: filename,
+                imageData: imageData
+            )
+        } else {
+            try await apiClient.deleteWorkAsset(workId: workId, kind: kind)
+        }
+    }
+
+    private func restoreAssets(for work: WorkRecord) async {
+        async let cover = try? apiClient.fetchWorkAsset(workId: work.id, kind: .cover)
+        async let avatar = try? apiClient.fetchWorkAsset(workId: work.id, kind: .avatar)
+        generatedContent.coverImageData = await cover
+        generatedContent.avatarImageData = await avatar
     }
 
     private func waitForGeneration(_ initialTask: GenerationTask) async throws -> GenerationTask {

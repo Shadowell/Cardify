@@ -167,3 +167,26 @@ public struct ExportImageRequest: Codable, Sendable {
         case imageBase64 = "image_base64"
     }
 }
+
+public enum WorkAssetKind: String, Codable, Sendable, CaseIterable {
+    case cover
+    case avatar
+}
+
+public struct WorkAssetRequest: Codable, Sendable {
+    public let kind: WorkAssetKind
+    public let filename: String
+    public let imageBase64: String
+
+    public init(kind: WorkAssetKind, filename: String, imageBase64: String) {
+        self.kind = kind
+        self.filename = filename
+        self.imageBase64 = imageBase64
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case kind
+        case filename
+        case imageBase64 = "image_base64"
+    }
+}

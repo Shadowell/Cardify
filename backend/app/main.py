@@ -2,7 +2,6 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 
 from .config import get_settings
 from .database import SessionLocal, init_db
@@ -33,8 +32,6 @@ def create_app() -> FastAPI:
     )
 
     settings.resolved_storage_root.mkdir(parents=True, exist_ok=True)
-    app.mount("/storage", StaticFiles(directory=settings.resolved_storage_root), name="storage")
-
     app.include_router(auth.router)
     app.include_router(templates.router)
     app.include_router(generations.router)

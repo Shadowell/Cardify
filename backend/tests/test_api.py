@@ -64,6 +64,41 @@ def test_work_save_and_local_export(client, authenticated_session):
     assert export_response.status_code == 200
     assert export_response.json()["export_path"].endswith("/card.png")
 
+    asset_response = client.post(
+        f"/works/{work_id}/assets",
+        json={
+            "kind": "cover",
+            "filename": "cover.jpg",
+            "image_base64": image_payload,
+        },
+        headers=authenticated_session["headers"],
+    )
+    assert asset_response.status_code == 200
+    asset_path = asset_response.json()["render_params"]["assets"]["cover"]
+    assert asset_path.endswith("/asset-cover-cover.jpg")
+    assert client.get(f"/storage/{asset_path}").status_code == 404
+
+    asset_read = client.get(f"/works/{work_id}/assets/cover", headers=authenticated_session["headers"])
+    assert asset_read.status_code == 200
+    assert asset_read.content == b"fake-png-bytes"
+
+    update_response = client.patch(
+        f"/works/{work_id}",
+        json={
+            "template_id": "parenting-note",
+            "title": "启蒙记录更新",
+            "input_text": "孩子每天 15 分钟英文儿歌输入。",
+            "render_params": {"canvas_size_id": "xhs-3-4"},
+        },
+        headers=authenticated_session["headers"],
+    )
+    assert update_response.status_code == 200
+    assert update_response.json()["render_params"]["assets"]["cover"].endswith("/asset-cover-cover.jpg")
+
+    asset_delete = client.delete(f"/works/{work_id}/assets/cover", headers=authenticated_session["headers"])
+    assert asset_delete.status_code == 200
+    assert client.get(f"/works/{work_id}/assets/cover", headers=authenticated_session["headers"]).status_code == 404
+
 
 def test_export_rejects_unsafe_extension(client, authenticated_session):
     work_response = client.post(
