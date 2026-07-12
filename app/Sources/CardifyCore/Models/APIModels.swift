@@ -131,6 +131,48 @@ public struct AuthSession: Codable, Sendable {
     }
 }
 
+public struct SubscriptionVerificationRequest: Codable, Sendable {
+    public let signedTransactionInfo: String
+
+    public init(signedTransactionInfo: String) {
+        self.signedTransactionInfo = signedTransactionInfo
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case signedTransactionInfo = "signed_transaction_info"
+    }
+}
+
+public struct MembershipStatus: Codable, Sendable, Equatable {
+    public let isPro: Bool
+    public let status: Status
+    public let productId: String?
+    public let expiresAt: Date?
+
+    public init(isPro: Bool, status: Status, productId: String? = nil, expiresAt: Date? = nil) {
+        self.isPro = isPro
+        self.status = status
+        self.productId = productId
+        self.expiresAt = expiresAt
+    }
+
+    public static let none = MembershipStatus(isPro: false, status: .none)
+
+    public enum Status: String, Codable, Sendable {
+        case none
+        case active
+        case expired
+        case revoked
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case isPro = "is_pro"
+        case status
+        case productId = "product_id"
+        case expiresAt = "expires_at"
+    }
+}
+
 public struct WorkRecord: Codable, Identifiable, Sendable {
     public let id: String
     public let templateId: String

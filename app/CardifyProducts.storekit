@@ -1,0 +1,126 @@
+{
+  "appPolicies" : {
+    "eula" : "",
+    "policies" : [
+      {
+        "locale" : "en_US",
+        "policyText" : "",
+        "policyURL" : ""
+      }
+    ]
+  },
+  "identifier" : "2CB64571",
+  "nonRenewingSubscriptions" : [
+
+  ],
+  "products" : [
+
+  ],
+  "settings" : {
+    "_askToBuyEnabled" : false,
+    "_billingGracePeriodEnabled" : false,
+    "_billingIssuesEnabled" : false,
+    "_disableDialogs" : false,
+    "_failTransactionsEnabled" : false,
+    "_locale" : "en_US",
+    "_renewalBillingIssuesEnabled" : false,
+    "_storefront" : "USA",
+    "_storeKitErrors" : [
+
+    ],
+    "_timeRate" : 0
+  },
+  "subscriptionGroups" : [
+    {
+      "id" : "A60A87D0",
+      "localizations" : [
+
+      ],
+      "name" : "Cardify Pro",
+      "subscriptions" : [
+        {
+          "adHocOffers" : [
+
+          ],
+          "billingPlans" : [
+            {
+              "billingPlanType" : "BILLED_UPFRONT",
+              "commitmentDisplayPrice" : "18",
+              "displayPrice" : "18",
+              "internalID" : "60482FDC",
+              "isEnabled" : true
+            }
+          ],
+          "codeOffers" : [
+
+          ],
+          "displayPrice" : "18",
+          "familyShareable" : false,
+          "groupNumber" : 1,
+          "internalID" : "A99CB2DA",
+          "introductoryOffers" : [
+
+          ],
+          "localizations" : [
+            {
+              "description" : "解锁全部卡片模板、高清导出和会员权益。",
+              "displayName" : "Cardify Pro 月度会员",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "com.jiefeng.cardify.pro.monthly",
+          "recurringSubscriptionPeriod" : "P1M",
+          "referenceName" : "Cardify Pro Monthly",
+          "subscriptionGroupID" : "A60A87D0",
+          "type" : "RecurringSubscription",
+          "winbackOffers" : [
+
+          ]
+        },
+        {
+          "adHocOffers" : [
+
+          ],
+          "billingPlans" : [
+            {
+              "billingPlanType" : "BILLED_UPFRONT",
+              "commitmentDisplayPrice" : "168",
+              "displayPrice" : "168",
+              "internalID" : "4E566A95",
+              "isEnabled" : true
+            }
+          ],
+          "codeOffers" : [
+
+          ],
+          "displayPrice" : "168",
+          "familyShareable" : false,
+          "groupNumber" : 1,
+          "internalID" : "3103F7C8",
+          "introductoryOffers" : [
+
+          ],
+          "localizations" : [
+            {
+              "description" : "年度会员，持续解锁全部卡片模板、高清导出和会员权益。",
+              "displayName" : "Cardify Pro 年度会员",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "com.jiefeng.cardify.pro.yearly",
+          "recurringSubscriptionPeriod" : "P1Y",
+          "referenceName" : "Cardify Pro Yearly",
+          "subscriptionGroupID" : "A60A87D0",
+          "type" : "RecurringSubscription",
+          "winbackOffers" : [
+
+          ]
+        }
+      ]
+    }
+  ],
+  "version" : {
+    "major" : 5,
+    "minor" : 0
+  }
+}

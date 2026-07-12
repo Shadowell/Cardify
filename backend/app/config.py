@@ -18,6 +18,15 @@ class Settings(BaseSettings):
     session_jwt_secret: str = Field(default="cardify-local-development-secret-change-before-release", alias="SESSION_JWT_SECRET")
     session_jwt_issuer: str = Field(default="cardify-api", alias="SESSION_JWT_ISSUER")
     session_ttl_days: int = Field(default=30, alias="SESSION_TTL_DAYS")
+    app_store_bundle_id: str = Field(default="com.jiefeng.cardify", alias="APP_STORE_BUNDLE_ID")
+    app_store_apple_id: int | None = Field(default=None, alias="APP_STORE_APPLE_ID")
+    app_store_root_certificates_path: Path | None = Field(default=None, alias="APP_STORE_ROOT_CERTIFICATES_PATH")
+    app_store_enable_online_checks: bool = Field(default=True, alias="APP_STORE_ENABLE_ONLINE_CHECKS")
+    app_store_product_ids: str = Field(
+        default="com.jiefeng.cardify.pro.monthly,com.jiefeng.cardify.pro.yearly",
+        alias="APP_STORE_PRODUCT_IDS",
+    )
+    allow_local_storekit_testing: bool = Field(default=False, alias="ALLOW_LOCAL_STOREKIT_TESTING")
     cors_origins: list[str] = Field(default_factory=lambda: ["http://127.0.0.1:5173"])
 
     model_config = SettingsConfigDict(
@@ -39,6 +48,17 @@ class Settings(BaseSettings):
     @property
     def resolved_storage_root(self) -> Path:
         return self.storage_root if self.storage_root.is_absolute() else Path(__file__).resolve().parents[1] / self.storage_root
+
+    @property
+    def resolved_app_store_root_certificates_path(self) -> Path | None:
+        if self.app_store_root_certificates_path is None:
+            return None
+        path = self.app_store_root_certificates_path
+        return path if path.is_absolute() else Path(__file__).resolve().parents[1] / path
+
+    @property
+    def allowed_app_store_product_ids(self) -> set[str]:
+        return {product_id.strip() for product_id in self.app_store_product_ids.split(",") if product_id.strip()}
 
 
 @lru_cache

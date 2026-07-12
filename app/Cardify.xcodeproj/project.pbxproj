@@ -27,6 +27,7 @@
 		B00000000000000000000208 /* Cardify.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Cardify.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		B00000000000000000000209 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Cardify/Info.plist; sourceTree = "<group>"; };
 		B00000000000000000000210 /* Cardify.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Cardify/Cardify.entitlements; sourceTree = "<group>"; };
+		BC7261E5300370FE00E7D46F /* CardifyProducts.storekit */ = {isa = PBXFileReference; lastKnownFileType = text; path = CardifyProducts.storekit; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -43,6 +44,7 @@
 		B00000000000000000000401 = {
 			isa = PBXGroup;
 			children = (
+				BC7261E5300370FE00E7D46F /* CardifyProducts.storekit */,
 				B00000000000000000000402 /* App */,
 				B00000000000000000000403 /* CardifyCore */,
 				B00000000000000000000207 /* Assets.xcassets */,

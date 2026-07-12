@@ -16,6 +16,10 @@ import PhotosUI
 import AuthenticationServices
 #endif
 
+#if canImport(StoreKit)
+import StoreKit
+#endif
+
 @main
 struct CardifyApp: App {
     @StateObject private var viewModel = CardifyViewModel()
@@ -68,6 +72,7 @@ private struct RootView: View {
             await viewModel.loadTemplates()
             await viewModel.syncLocalDraftsNow(showEmptyState: false)
             await viewModel.loadWorks()
+            await viewModel.loadMembership()
         }
     }
 }
@@ -1275,7 +1280,7 @@ private struct ProfileView: View {
     var body: some View {
         NavigationStack {
             List {
-                Section("账户与订阅") {
+                Section("账户") {
                     if let user = viewModel.currentUser {
                         HStack {
                             Label(user.displayName ?? "已通过 Apple 登录", systemImage: "checkmark.seal.fill")
@@ -1290,12 +1295,148 @@ private struct ProfileView: View {
                     } else {
                         AppleSignInControl()
                     }
-                    Label("StoreKit 2 订阅", systemImage: "crown")
                     Label("加密会话", systemImage: "key.fill")
+                }
+
+                Section("Cardify Pro") {
+                    MembershipStatusRow(status: viewModel.membershipStatus)
+
+                    if viewModel.currentUser == nil {
+                        Text("登录后即可开通会员，并在已登录设备之间同步权益。")
+                            .font(.footnote)
+                            .foregroundStyle(Color.cardifyMuted)
+                    } else if viewModel.isMembershipLoading && viewModel.subscriptionProducts.isEmpty {
+                        HStack(spacing: 10) {
+                            ProgressView()
+                            Text("正在获取会员方案")
+                                .font(.subheadline)
+                                .foregroundStyle(Color.cardifyMuted)
+                        }
+                    } else if viewModel.subscriptionProducts.isEmpty {
+                        Button("重新加载会员方案", systemImage: "arrow.clockwise") {
+                            Task { await viewModel.loadMembership() }
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(Color.cardifyNavActive)
+                    } else {
+                        ForEach(viewModel.subscriptionProducts) { product in
+                            MembershipPlanRow(
+                                product: product,
+                                isRecommended: product.id == "com.jiefeng.cardify.pro.monthly"
+                            ) {
+                                Task { await viewModel.purchaseMembership(product) }
+                            }
+                            .disabled(viewModel.isPurchasingMembership)
+                        }
+
+                        Button("恢复购买", systemImage: "arrow.clockwise") {
+                            Task { await viewModel.restoreMembershipPurchases() }
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(Color.cardifyNavActive)
+                        .disabled(viewModel.isPurchasingMembership)
+                    }
+
+                    if let message = viewModel.membershipErrorMessage {
+                        Label(message, systemImage: "exclamationmark.circle")
+                            .font(.footnote)
+                            .foregroundStyle(.orange)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
             }
             .navigationTitle("我的")
         }
+    }
+}
+
+private struct MembershipStatusRow: View {
+    let status: MembershipStatus
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: status.isPro ? "crown.fill" : "crown")
+                .font(.title3)
+                .foregroundStyle(status.isPro ? Color.cardifyNavActive : Color.cardifyMuted)
+                .frame(width: 30, height: 30)
+                .background(Color.cardifyMint.opacity(0.58), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(status.isPro ? "Pro 已生效" : "未开通会员")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Color.cardifyInk)
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(Color.cardifyMuted)
+            }
+
+            Spacer(minLength: 8)
+
+            Text(status.isPro ? "已开通" : statusLabel)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(status.isPro ? Color.cardifyNavActive : Color.cardifyMuted)
+        }
+        .padding(.vertical, 3)
+    }
+
+    private var detail: String {
+        if let expiresAt = status.expiresAt {
+            return "有效至 \(expiresAt.formatted(date: .abbreviated, time: .omitted))"
+        }
+        return status.isPro ? "权益已同步到当前账户" : "解锁更多创作权益"
+    }
+
+    private var statusLabel: String {
+        switch status.status {
+        case .expired: return "已到期"
+        case .revoked: return "已失效"
+        case .none, .active: return "免费版"
+        }
+    }
+}
+
+private struct MembershipPlanRow: View {
+    let product: Product
+    let isRecommended: Bool
+    let action: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(product.displayName)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Color.cardifyInk)
+                if isRecommended {
+                    Text("推荐")
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(Color.cardifyNavActive)
+                }
+                Spacer(minLength: 8)
+                Text(product.displayPrice)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Color.cardifyInk)
+            }
+
+            if !product.description.isEmpty {
+                Text(product.description)
+                    .font(.caption)
+                    .foregroundStyle(Color.cardifyMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if isRecommended {
+                Button("开通 Pro", action: action)
+                    .buttonStyle(.borderedProminent)
+                    .tint(Color.cardifyNavActive)
+                    .controlSize(.regular)
+            } else {
+                Button("选择此方案", action: action)
+                    .buttonStyle(.bordered)
+                    .tint(Color.cardifyNavActive)
+                    .controlSize(.regular)
+            }
+        }
+        .padding(.vertical, 5)
     }
 }
 

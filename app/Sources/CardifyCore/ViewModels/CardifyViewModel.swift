@@ -4,6 +4,10 @@ import Foundation
 import Security
 #endif
 
+#if canImport(StoreKit)
+import StoreKit
+#endif
+
 @MainActor
 public final class CardifyViewModel: ObservableObject {
     @Published public var inputText: String = ""
@@ -17,12 +21,23 @@ public final class CardifyViewModel: ObservableObject {
     @Published public private(set) var isLoading = false
     @Published public private(set) var isSaving = false
     @Published public private(set) var isAuthenticating = false
+    @Published public private(set) var subscriptionProducts: [Product] = []
+    @Published public private(set) var membershipStatus: MembershipStatus = .none
+    @Published public private(set) var isMembershipLoading = false
+    @Published public private(set) var isPurchasingMembership = false
+    @Published public private(set) var membershipErrorMessage: String?
     @Published public private(set) var errorMessage: String?
     @Published public private(set) var successMessage: String?
 
     private var apiClient: APIClient
     private var activeWorkId: String?
     private var activeDraftId: String?
+    private var transactionUpdatesTask: Task<Void, Never>?
+
+    public static let membershipProductIDs = [
+        "com.jiefeng.cardify.pro.monthly",
+        "com.jiefeng.cardify.pro.yearly",
+    ]
 
     public init(apiClient: APIClient = APIClient()) {
         self.apiClient = apiClient
@@ -31,6 +46,7 @@ public final class CardifyViewModel: ObservableObject {
             currentUser = storedSession.user
             self.apiClient.accessToken = storedSession.accessToken
         }
+        observeTransactionUpdates()
     }
 
     public func loadTemplates() async {
@@ -52,6 +68,74 @@ public final class CardifyViewModel: ObservableObject {
             works = try await apiClient.listWorks()
         } catch {
             errorMessage = error.localizedDescription
+        }
+    }
+
+    public func loadMembership() async {
+        isMembershipLoading = true
+        membershipErrorMessage = nil
+        defer { isMembershipLoading = false }
+
+        do {
+            subscriptionProducts = try await Product.products(for: Self.membershipProductIDs)
+                .filter { $0.type == .autoRenewable }
+                .sorted { $0.id < $1.id }
+        } catch {
+            membershipErrorMessage = "暂时无法获取会员方案，请检查网络后重试"
+        }
+
+        await refreshStoreKitEntitlements()
+    }
+
+    public func purchaseMembership(_ product: Product) async {
+        guard let currentUser else {
+            membershipErrorMessage = "请先通过 Apple 登录，再购买会员"
+            return
+        }
+        guard let appAccountToken = UUID(uuidString: currentUser.id) else {
+            membershipErrorMessage = "账户信息异常，请退出后重新登录"
+            return
+        }
+
+        isPurchasingMembership = true
+        membershipErrorMessage = nil
+        defer { isPurchasingMembership = false }
+
+        do {
+            let result = try await product.purchase(options: [.appAccountToken(appAccountToken)])
+            switch result {
+            case .success(let verification):
+                let transaction = try verifiedTransaction(from: verification)
+                await applyVerifiedTransaction(transaction, syncToServer: true)
+                await transaction.finish()
+                successMessage = "会员购买成功"
+            case .pending:
+                membershipErrorMessage = "购买正在等待确认，请稍后在此查看会员状态"
+            case .userCancelled:
+                break
+            @unknown default:
+                membershipErrorMessage = "购买未完成，请稍后重试"
+            }
+        } catch {
+            membershipErrorMessage = "购买未完成：\(error.localizedDescription)"
+        }
+    }
+
+    public func restoreMembershipPurchases() async {
+        isPurchasingMembership = true
+        membershipErrorMessage = nil
+        defer { isPurchasingMembership = false }
+
+        do {
+            try await AppStore.sync()
+            await refreshStoreKitEntitlements()
+            if membershipStatus.isPro {
+                successMessage = "已恢复会员权益"
+            } else {
+                membershipErrorMessage = "没有找到可恢复的 Cardify 会员"
+            }
+        } catch {
+            membershipErrorMessage = "恢复购买失败，请稍后重试"
         }
     }
 
@@ -234,6 +318,7 @@ public final class CardifyViewModel: ObservableObject {
             let pendingDraftCount = localDrafts.count
             let syncedDraftCount = await syncLocalDrafts()
             await loadWorks()
+            await loadMembership()
             if syncedDraftCount > 0 {
                 successMessage = "已登录，已同步 \(syncedDraftCount) 个本机草稿"
             } else if pendingDraftCount > 0 {
@@ -258,6 +343,8 @@ public final class CardifyViewModel: ObservableObject {
         activeWorkId = nil
         activeDraftId = nil
         apiClient.accessToken = nil
+        membershipStatus = .none
+        membershipErrorMessage = nil
         LoginSessionStore.clear()
         successMessage = "已退出登录"
     }
@@ -459,6 +546,114 @@ public final class CardifyViewModel: ObservableObject {
             task = try await apiClient.getGeneration(id: task.id)
         }
         return task
+    }
+
+    private func observeTransactionUpdates() {
+        transactionUpdatesTask = Task { [weak self] in
+            for await result in Transaction.updates {
+                guard let self else { return }
+                await self.handleTransactionUpdate(result)
+            }
+        }
+    }
+
+    private func handleTransactionUpdate(_ result: VerificationResult<Transaction>) async {
+        do {
+            let transaction = try verifiedTransaction(from: result)
+            await applyVerifiedTransaction(transaction, syncToServer: currentUser != nil)
+            await transaction.finish()
+        } catch {
+            membershipErrorMessage = "无法验证新的会员交易，请稍后重试"
+        }
+    }
+
+    private func refreshStoreKitEntitlements() async {
+        var hasActiveEntitlement = false
+
+        for await result in Transaction.currentEntitlements {
+            do {
+                let transaction = try verifiedTransaction(from: result)
+                guard Self.membershipProductIDs.contains(transaction.productID) else { continue }
+                hasActiveEntitlement = true
+                await applyVerifiedTransaction(transaction, syncToServer: currentUser != nil)
+            } catch {
+                membershipErrorMessage = "无法验证已有会员权益，请稍后重试"
+            }
+        }
+
+        if !hasActiveEntitlement {
+            await refreshMembershipFromServer()
+        }
+    }
+
+    private func applyVerifiedTransaction(_ transaction: Transaction, syncToServer: Bool) async {
+        guard Self.membershipProductIDs.contains(transaction.productID) else { return }
+
+        if transaction.revocationDate != nil {
+            membershipStatus = MembershipStatus(
+                isPro: false,
+                status: .revoked,
+                productId: transaction.productID,
+                expiresAt: transaction.expirationDate
+            )
+        } else if let expirationDate = transaction.expirationDate, expirationDate <= Date() {
+            membershipStatus = MembershipStatus(
+                isPro: false,
+                status: .expired,
+                productId: transaction.productID,
+                expiresAt: expirationDate
+            )
+        } else {
+            membershipStatus = MembershipStatus(
+                isPro: true,
+                status: .active,
+                productId: transaction.productID,
+                expiresAt: transaction.expirationDate
+            )
+        }
+
+        guard syncToServer, currentUser != nil else { return }
+        guard let signedTransactionInfo = String(data: transaction.jsonRepresentation, encoding: .utf8) else {
+            membershipErrorMessage = "购买已完成，暂时无法同步会员状态"
+            return
+        }
+        do {
+            membershipStatus = try await apiClient.verifySubscription(
+                signedTransactionInfo: signedTransactionInfo
+            )
+        } catch {
+            membershipErrorMessage = "购买已完成，会员状态会在网络恢复后自动同步"
+        }
+    }
+
+    private func refreshMembershipFromServer() async {
+        guard currentUser != nil else {
+            membershipStatus = .none
+            return
+        }
+
+        do {
+            membershipStatus = try await apiClient.membershipStatus()
+        } catch {
+            membershipErrorMessage = "暂时无法同步会员状态，请稍后重试"
+        }
+    }
+
+    private func verifiedTransaction(from result: VerificationResult<Transaction>) throws -> Transaction {
+        switch result {
+        case .verified(let transaction):
+            return transaction
+        case .unverified:
+            throw StoreKitTransactionError.unverified
+        }
+    }
+}
+
+private enum StoreKitTransactionError: LocalizedError {
+    case unverified
+
+    var errorDescription: String? {
+        "App Store 未能验证这笔交易"
     }
 }
 

@@ -133,10 +133,7 @@ class AuthSessionOut(BaseModel):
 
 
 class SubscriptionVerifyCreate(BaseModel):
-    user_id: str
-    product_id: str = Field(min_length=1)
-    transaction_id: str = Field(min_length=1)
-    expires_at: datetime | None = None
+    signed_transaction_info: str = Field(min_length=32, max_length=100_000)
 
 
 class SubscriptionOut(BaseModel):
@@ -150,3 +147,10 @@ class SubscriptionOut(BaseModel):
     status: str
     expires_at: datetime | None
     created_at: datetime
+
+
+class MembershipStatusOut(BaseModel):
+    is_pro: bool
+    status: Literal["none", "active", "expired", "revoked"]
+    product_id: str | None = None
+    expires_at: datetime | None = None

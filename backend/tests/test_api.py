@@ -1,6 +1,10 @@
 import base64
 from datetime import datetime, timedelta, timezone
 
+from app.routers.subscriptions import get_storekit_transaction_verifier
+from app.services.storekit import VerifiedStoreKitTransaction
+from app.main import app
+
 
 def test_templates_are_seeded(client):
     response = client.get("/templates")
@@ -158,21 +162,61 @@ def test_work_update_list_and_delete(client, authenticated_session):
     assert deleted.json()["deleted"] == work_id
 
 
-def test_auth_session_and_subscription_stub(client, authenticated_session):
-    user_id = authenticated_session["user_id"]
+class StubStoreKitTransactionVerifier:
+    def __init__(self, transaction: VerifiedStoreKitTransaction):
+        self.transaction = transaction
 
+    def verify(self, signed_transaction_info: str) -> VerifiedStoreKitTransaction:
+        assert signed_transaction_info == "signed-apple-transaction-token-123456789"
+        return self.transaction
+
+
+def test_subscription_verification_requires_a_signed_apple_transaction(client, authenticated_session):
+    user_id = authenticated_session["user_id"]
     expires_at = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
-    subscription_response = client.post(
-        "/subscriptions/verify",
-        json={
-            "user_id": user_id,
-            "product_id": "cardify.pro.monthly",
-            "transaction_id": "tx-local-1",
-            "expires_at": expires_at,
-        },
+    transaction = VerifiedStoreKitTransaction(
+        transaction_id="tx-local-1",
+        product_id="com.jiefeng.cardify.pro.monthly",
+        app_account_token=user_id,
+        expires_at=datetime.fromisoformat(expires_at),
+        revoked_at=None,
     )
-    assert subscription_response.status_code == 200
-    assert subscription_response.json()["status"] == "active"
+    app.dependency_overrides[get_storekit_transaction_verifier] = lambda: StubStoreKitTransactionVerifier(transaction)
+    try:
+        subscription_response = client.post(
+            "/subscriptions/verify",
+            json={"signed_transaction_info": "signed-apple-transaction-token-123456789"},
+            headers=authenticated_session["headers"],
+        )
+        assert subscription_response.status_code == 200, subscription_response.text
+        assert subscription_response.json()["status"] == "active"
+        assert subscription_response.json()["is_pro"] is True
+
+        status_response = client.get("/subscriptions/me", headers=authenticated_session["headers"])
+        assert status_response.status_code == 200
+        assert status_response.json()["product_id"] == "com.jiefeng.cardify.pro.monthly"
+    finally:
+        app.dependency_overrides.pop(get_storekit_transaction_verifier, None)
+
+
+def test_subscription_rejects_a_transaction_bound_to_another_user(client, authenticated_session):
+    transaction = VerifiedStoreKitTransaction(
+        transaction_id="tx-other-account",
+        product_id="com.jiefeng.cardify.pro.monthly",
+        app_account_token="00000000-0000-0000-0000-000000000001",
+        expires_at=datetime.now(timezone.utc) + timedelta(days=30),
+        revoked_at=None,
+    )
+    app.dependency_overrides[get_storekit_transaction_verifier] = lambda: StubStoreKitTransactionVerifier(transaction)
+    try:
+        response = client.post(
+            "/subscriptions/verify",
+            json={"signed_transaction_info": "signed-apple-transaction-token-123456789"},
+            headers=authenticated_session["headers"],
+        )
+        assert response.status_code == 403, response.text
+    finally:
+        app.dependency_overrides.pop(get_storekit_transaction_verifier, None)
 
 
 def test_work_endpoints_require_an_authenticated_session(client):

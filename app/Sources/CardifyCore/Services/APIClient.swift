@@ -50,6 +50,18 @@ public struct APIClient: Sendable {
         try await request(path: "/auth/apple/login", method: "POST", body: payload)
     }
 
+    public func membershipStatus() async throws -> MembershipStatus {
+        try await request(path: "/subscriptions/me")
+    }
+
+    public func verifySubscription(signedTransactionInfo: String) async throws -> MembershipStatus {
+        try await request(
+            path: "/subscriptions/verify",
+            method: "POST",
+            body: SubscriptionVerificationRequest(signedTransactionInfo: signedTransactionInfo)
+        )
+    }
+
     public func createWork(_ payload: WorkCreateRequest) async throws -> WorkRecord {
         try await request(path: "/works", method: "POST", body: payload)
     }
