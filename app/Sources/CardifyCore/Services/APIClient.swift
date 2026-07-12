@@ -110,9 +110,27 @@ public struct APIClient: Sendable {
         try await request(path: "/works/\(id)", method: "PATCH", body: payload)
     }
 
-    public func listWorks() async throws -> [WorkRecord] {
-        let response: WorkListResponse = try await request(path: "/works")
-        return response.items
+    public func listWorks(
+        query: String? = nil,
+        templateId: String? = nil,
+        exported: Bool? = nil,
+        page: Int = 1,
+        pageSize: Int = 24
+    ) async throws -> WorkListResponse {
+        var queryItems = [
+            URLQueryItem(name: "page", value: String(page)),
+            URLQueryItem(name: "page_size", value: String(pageSize)),
+        ]
+        if let query = query?.trimmingCharacters(in: .whitespacesAndNewlines), !query.isEmpty {
+            queryItems.append(URLQueryItem(name: "query", value: query))
+        }
+        if let templateId, !templateId.isEmpty {
+            queryItems.append(URLQueryItem(name: "template_id", value: templateId))
+        }
+        if let exported {
+            queryItems.append(URLQueryItem(name: "exported", value: exported ? "true" : "false"))
+        }
+        return try await request(path: "/works", queryItems: queryItems)
     }
 
     public func deleteWork(id: String) async throws {
@@ -122,6 +140,14 @@ public struct APIClient: Sendable {
     private func request<Response: Decodable>(path: String, method: String = "GET") async throws -> Response {
         var request = URLRequest(url: url(for: path))
         request.httpMethod = method
+        authorize(&request)
+        let (data, urlResponse) = try await send(request)
+        try validate(urlResponse, data: data)
+        return try decoder.decode(Response.self, from: data)
+    }
+
+    private func request<Response: Decodable>(path: String, queryItems: [URLQueryItem]) async throws -> Response {
+        var request = URLRequest(url: url(for: path, queryItems: queryItems))
         authorize(&request)
         let (data, urlResponse) = try await send(request)
         try validate(urlResponse, data: data)
@@ -166,6 +192,12 @@ public struct APIClient: Sendable {
         let base = baseURL.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         let cleanPath = path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         return URL(string: "\(base)/\(cleanPath)")!
+    }
+
+    private func url(for path: String, queryItems: [URLQueryItem]) -> URL {
+        var components = URLComponents(url: url(for: path), resolvingAgainstBaseURL: false)!
+        components.queryItems = queryItems
+        return components.url!
     }
 
     private func authorize(_ request: inout URLRequest) {

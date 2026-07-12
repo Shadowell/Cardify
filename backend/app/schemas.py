@@ -98,6 +98,9 @@ class WorkOut(BaseModel):
 
 class WorkListOut(BaseModel):
     items: list[WorkOut]
+    total: int
+    page: int
+    page_size: int
 
 
 class ExportImageCreate(BaseModel):

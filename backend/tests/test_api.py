@@ -156,10 +156,54 @@ def test_work_update_list_and_delete(client, authenticated_session):
     listed = client.get("/works", headers=authenticated_session["headers"])
     assert listed.status_code == 200
     assert any(item["id"] == work_id for item in listed.json()["items"])
+    assert listed.json()["total"] >= 1
 
     deleted = client.delete(f"/works/{work_id}", headers=authenticated_session["headers"])
     assert deleted.status_code == 200
     assert deleted.json()["deleted"] == work_id
+
+
+def test_work_list_filters_and_pagination(client, authenticated_session):
+    headers = authenticated_session["headers"]
+    for index, payload in enumerate(
+        [
+            {"template_id": "knowledge-note", "title": "知识笔记", "input_text": "一段知识内容。"},
+            {"template_id": "parenting-note", "title": "育儿笔记", "input_text": "孩子的成长记录。"},
+            {"template_id": "knowledge-note", "title": "知识复盘", "input_text": "另一段知识内容。"},
+        ]
+    ):
+        created = client.post(
+            "/works",
+            json={**payload, "render_params": {"canvas_size_id": "xhs-3-4"}},
+            headers=headers,
+        )
+        assert created.status_code == 201
+        if index == 0:
+            exported = client.post(
+                f"/works/{created.json()['id']}/export",
+                json={"filename": "card.png", "image_base64": base64.b64encode(b"preview").decode("ascii")},
+                headers=headers,
+            )
+            assert exported.status_code == 200
+
+    filtered = client.get(
+        "/works",
+        params={"query": "知识", "template_id": "knowledge-note", "page": 1, "page_size": 1},
+        headers=headers,
+    )
+    assert filtered.status_code == 200
+    assert filtered.json()["total"] == 2
+    assert len(filtered.json()["items"]) == 1
+    assert filtered.json()["page"] == 1
+    assert filtered.json()["page_size"] == 1
+
+    exported = client.get("/works", params={"exported": "true"}, headers=headers)
+    assert exported.status_code == 200
+    assert exported.json()["total"] == 1
+
+    pending_export = client.get("/works", params={"exported": "false"}, headers=headers)
+    assert pending_export.status_code == 200
+    assert pending_export.json()["total"] == 2
 
 
 class StubStoreKitTransactionVerifier:

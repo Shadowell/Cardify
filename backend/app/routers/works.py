@@ -1,8 +1,9 @@
 import mimetypes
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import FileResponse
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from ..config import get_settings
@@ -38,9 +39,36 @@ def create_work(payload: WorkCreate, current_user: User = Depends(get_current_us
 
 
 @router.get("", response_model=WorkListOut)
-def list_works(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> WorkListOut:
-    statement = select(Work).where(Work.user_id == current_user.id).order_by(Work.created_at.desc())
-    return WorkListOut(items=db.scalars(statement).all())
+def list_works(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    query: Annotated[str | None, Query(max_length=160)] = None,
+    template_id: Annotated[str | None, Query(max_length=80)] = None,
+    exported: bool | None = None,
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 24,
+) -> WorkListOut:
+    filters = [Work.user_id == current_user.id]
+    search_text = query.strip() if query else ""
+    if search_text:
+        pattern = f"%{search_text}%"
+        filters.append(or_(Work.title.ilike(pattern), Work.input_text.ilike(pattern)))
+    if template_id:
+        filters.append(Work.template_id == template_id)
+    if exported is True:
+        filters.append(Work.export_path.is_not(None))
+    elif exported is False:
+        filters.append(Work.export_path.is_(None))
+
+    total = db.scalar(select(func.count()).select_from(Work).where(*filters)) or 0
+    statement = (
+        select(Work)
+        .where(*filters)
+        .order_by(Work.updated_at.desc(), Work.created_at.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )
+    return WorkListOut(items=db.scalars(statement).all(), total=total, page=page, page_size=page_size)
 
 
 @router.patch("/{work_id}", response_model=WorkOut)

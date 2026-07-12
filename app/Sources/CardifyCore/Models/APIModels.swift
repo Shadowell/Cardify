@@ -180,6 +180,8 @@ public struct WorkRecord: Codable, Identifiable, Sendable {
     public let inputText: String
     public let renderParams: [String: JSONValue]
     public let exportPath: String?
+    public let createdAt: Date
+    public let updatedAt: Date
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -188,6 +190,8 @@ public struct WorkRecord: Codable, Identifiable, Sendable {
         case inputText = "input_text"
         case renderParams = "render_params"
         case exportPath = "export_path"
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
     }
 }
 
@@ -224,6 +228,16 @@ public struct LocalDraftRecord: Codable, Identifiable, Sendable {
 
 public struct WorkListResponse: Codable, Sendable {
     public let items: [WorkRecord]
+    public let total: Int
+    public let page: Int
+    public let pageSize: Int
+
+    enum CodingKeys: String, CodingKey {
+        case items
+        case total
+        case page
+        case pageSize = "page_size"
+    }
 }
 
 public struct ExportImageRequest: Codable, Sendable {

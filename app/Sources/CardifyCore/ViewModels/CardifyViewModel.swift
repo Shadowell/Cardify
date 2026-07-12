@@ -13,6 +13,10 @@ public final class CardifyViewModel: ObservableObject {
     @Published public var inputText: String = ""
     @Published public private(set) var templates: [TemplateSummary] = []
     @Published public private(set) var works: [WorkRecord] = []
+    @Published public private(set) var worksTotal = 0
+    @Published public private(set) var isLoadingWorks = false
+    @Published public private(set) var worksErrorMessage: String?
+    @Published public private(set) var hasMoreWorks = false
     @Published public private(set) var localDrafts: [LocalDraftRecord] = []
     @Published public private(set) var currentUser: UserRecord?
     @Published public var selectedTemplate: TemplateSummary?
@@ -33,6 +37,10 @@ public final class CardifyViewModel: ObservableObject {
     private var activeWorkId: String?
     private var activeDraftId: String?
     private var transactionUpdatesTask: Task<Void, Never>?
+    private var currentWorksQuery = ""
+    private var currentWorksTemplateId: String?
+    private var currentWorksExported: Bool?
+    private var nextWorksPage = 1
 
     public static let membershipProductIDs = [
         "com.jiefeng.cardify.pro.monthly",
@@ -59,15 +67,58 @@ public final class CardifyViewModel: ObservableObject {
         }
     }
 
-    public func loadWorks() async {
+    public func loadWorks(query: String = "", templateId: String? = nil, exported: Bool? = nil) async {
         guard currentUser != nil else {
             works = []
+            worksTotal = 0
+            hasMoreWorks = false
             return
         }
+
+        isLoadingWorks = true
+        worksErrorMessage = nil
+        defer { isLoadingWorks = false }
+
+        currentWorksQuery = query
+        currentWorksTemplateId = templateId
+        currentWorksExported = exported
         do {
-            works = try await apiClient.listWorks()
+            let response = try await apiClient.listWorks(
+                query: query,
+                templateId: templateId,
+                exported: exported,
+                page: 1
+            )
+            works = response.items
+            worksTotal = response.total
+            nextWorksPage = response.page + 1
+            hasMoreWorks = works.count < response.total
         } catch {
-            errorMessage = error.localizedDescription
+            worksErrorMessage = error.localizedDescription
+        }
+    }
+
+    public func loadMoreWorks() async {
+        guard currentUser != nil, hasMoreWorks, !isLoadingWorks else { return }
+
+        isLoadingWorks = true
+        worksErrorMessage = nil
+        defer { isLoadingWorks = false }
+
+        do {
+            let response = try await apiClient.listWorks(
+                query: currentWorksQuery,
+                templateId: currentWorksTemplateId,
+                exported: currentWorksExported,
+                page: nextWorksPage
+            )
+            let currentIds = Set(works.map(\.id))
+            works.append(contentsOf: response.items.filter { !currentIds.contains($0.id) })
+            worksTotal = response.total
+            nextWorksPage = response.page + 1
+            hasMoreWorks = works.count < response.total
+        } catch {
+            worksErrorMessage = error.localizedDescription
         }
     }
 
@@ -340,6 +391,9 @@ public final class CardifyViewModel: ObservableObject {
     public func signOut() {
         currentUser = nil
         works = []
+        worksTotal = 0
+        hasMoreWorks = false
+        worksErrorMessage = nil
         activeWorkId = nil
         activeDraftId = nil
         apiClient.accessToken = nil
@@ -376,6 +430,8 @@ public final class CardifyViewModel: ObservableObject {
         do {
             try await apiClient.deleteWork(id: work.id)
             works.removeAll { $0.id == work.id }
+            worksTotal = max(0, worksTotal - 1)
+            hasMoreWorks = works.count < worksTotal
             if activeWorkId == work.id {
                 activeWorkId = nil
             }

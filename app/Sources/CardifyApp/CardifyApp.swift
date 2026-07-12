@@ -1132,109 +1132,599 @@ private struct WorksView: View {
     @EnvironmentObject private var viewModel: CardifyViewModel
     let onOpenWork: () -> Void
     @State private var isSignInPresented = false
+    @State private var scope: WorkLibraryScope = .all
+    @State private var searchText = ""
+    @State private var templateFilterID: String?
+    @State private var exportFilter: WorkExportFilter = .all
+    @State private var pendingDeletion: PendingLibraryDeletion?
+
+    private let gridColumns = [
+        GridItem(.flexible(minimum: 144), spacing: 12),
+        GridItem(.flexible(minimum: 144), spacing: 12),
+    ]
 
     var body: some View {
         NavigationStack {
-            List {
-                if !viewModel.localDrafts.isEmpty {
-                    Section("本机草稿") {
-                        ForEach(viewModel.localDrafts) { draft in
-                            Button {
-                                if viewModel.reopenLocalDraft(draft) {
-                                    onOpenWork()
-                                }
-                            } label: {
-                                LocalDraftRow(
-                                    draft: draft,
-                                    template: viewModel.templates.first(where: { $0.id == draft.templateId })
-                                )
-                            }
-                            .buttonStyle(.plain)
-                            .swipeActions {
-                                Button(role: .destructive) {
-                                    viewModel.deleteLocalDraft(draft)
-                                } label: {
-                                    Label("删除", systemImage: "trash")
-                                }
-                            }
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 18) {
+                    WorkLibrarySummary(
+                        workCount: viewModel.currentUser == nil ? 0 : viewModel.worksTotal,
+                        draftCount: filteredDrafts.count,
+                        isSignedIn: viewModel.currentUser != nil
+                    )
+
+                    Picker("作品范围", selection: $scope) {
+                        ForEach(WorkLibraryScope.available(isSignedIn: viewModel.currentUser != nil)) { scope in
+                            Text(scope.title).tag(scope)
                         }
                     }
+                    .pickerStyle(.segmented)
 
-                    if viewModel.currentUser != nil {
-                        Section {
-                            Button("同步本机草稿", systemImage: "arrow.triangle.2.circlepath") {
-                                Task { await viewModel.syncLocalDraftsNow() }
-                            }
-                            .disabled(viewModel.isSaving)
-                        } footer: {
-                            Text("同步后会保存到你的账户，并可在其他已登录设备继续创作。")
-                        }
-                    }
-                }
+                    WorkLibraryFilters(
+                        templates: viewModel.templates,
+                        selectedTemplateID: $templateFilterID,
+                        exportFilter: $exportFilter,
+                        showsExportFilter: scope != .drafts && viewModel.currentUser != nil
+                    )
 
-                if viewModel.currentUser == nil {
-                    if viewModel.localDrafts.isEmpty {
-                        ContentUnavailableView(
-                            "还没有本机草稿",
-                            systemImage: "rectangle.stack.badge.plus",
-                            description: Text("保存草稿后，可在这里继续编辑或登录后同步")
-                        )
-                        .listRowBackground(Color.clear)
+                    if let message = viewModel.worksErrorMessage {
+                        Label(message, systemImage: "exclamationmark.circle")
+                            .font(.footnote)
+                            .foregroundStyle(.orange)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
 
-                    Section {
-                        Button("通过 Apple 登录") {
+                    if isCompletelyEmpty {
+                        WorkLibraryEmptyState(isSignedIn: viewModel.currentUser != nil) {
                             isSignInPresented = true
                         }
-                        .buttonStyle(.borderedProminent)
-                    } footer: {
-                        Text("登录后会自动同步本机草稿，并可在其他已登录设备继续创作。")
-                    }
-                } else if viewModel.works.isEmpty {
-                    ContentUnavailableView(
-                        "还没有作品",
-                        systemImage: "rectangle.stack.badge.plus",
-                        description: Text("完成并保存一张魔卡后，它会出现在这里")
-                    )
-                    .listRowBackground(Color.clear)
-                } else {
-                    ForEach(viewModel.works) { work in
-                        Button {
-                            Task {
-                                if await viewModel.reopenWork(work) {
-                                    onOpenWork()
-                                }
-                            }
-                        } label: {
-                            WorkRow(work: work, template: viewModel.templates.first(where: { $0.id == work.templateId }))
+                    } else {
+                        if showsWorks {
+                            workSection
                         }
-                        .buttonStyle(.plain)
-                        .swipeActions {
-                            Button(role: .destructive) {
-                                Task { await viewModel.deleteWork(work) }
-                            } label: {
-                                Label("删除", systemImage: "trash")
-                            }
+
+                        if showsDrafts {
+                            draftsSection
                         }
                     }
                 }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
             }
+            .background(Color.cardifyPaper)
             .navigationTitle("作品")
+            .searchable(text: $searchText, prompt: "搜索标题或内容")
+            .onSubmit(of: .search) {
+                Task { await reloadWorks() }
+            }
+            .onChange(of: searchText) { _, value in
+                if value.isEmpty {
+                    Task { await reloadWorks() }
+                }
+            }
+            .onChange(of: templateFilterID) { _, _ in
+                Task { await reloadWorks() }
+            }
+            .onChange(of: exportFilter) { _, _ in
+                Task { await reloadWorks() }
+            }
+            .onChange(of: viewModel.currentUser?.id) { _, userID in
+                if userID == nil {
+                    scope = .all
+                }
+                Task { await reloadWorks() }
+            }
             .toolbar {
                 Button {
-                    Task { await viewModel.loadWorks() }
+                    Task { await reloadWorks() }
                 } label: {
                     Image(systemName: "arrow.clockwise")
                 }
                 .accessibilityLabel("刷新作品")
             }
             .task {
-                await viewModel.loadWorks()
+                await reloadWorks()
+            }
+            .refreshable {
+                await reloadWorks()
             }
             .sheet(isPresented: $isSignInPresented) {
                 AccountSignInSheet()
             }
+            .alert("删除此内容？", isPresented: Binding(
+                get: { pendingDeletion != nil },
+                set: { if !$0 { pendingDeletion = nil } }
+            )) {
+                Button("取消", role: .cancel) {
+                    pendingDeletion = nil
+                }
+                Button("删除", role: .destructive) {
+                    deletePendingItem()
+                }
+            } message: {
+                Text(pendingDeletion?.message ?? "删除后无法恢复。")
+            }
         }
+    }
+
+    @ViewBuilder
+    private var workSection: some View {
+        WorkLibrarySectionHeader(
+            title: "云端作品",
+            detail: "\(viewModel.worksTotal) 个"
+        )
+
+        if viewModel.isLoadingWorks && viewModel.works.isEmpty {
+            HStack(spacing: 10) {
+                ProgressView()
+                Text("正在整理作品库")
+                    .font(.subheadline)
+                    .foregroundStyle(Color.cardifyMuted)
+            }
+            .frame(maxWidth: .infinity, minHeight: 120)
+        } else if viewModel.currentUser == nil {
+            WorkLibrarySignInPrompt {
+                isSignInPresented = true
+            }
+        } else if viewModel.works.isEmpty {
+            WorkLibraryNoResults(title: "没有找到作品", detail: "换个关键词或筛选条件试试")
+        } else {
+            LazyVGrid(columns: gridColumns, spacing: 12) {
+                ForEach(viewModel.works) { work in
+                    WorkLibraryCard(
+                        title: work.title,
+                        content: CardContent(
+                            renderParams: work.renderParams,
+                            fallbackTitle: work.title,
+                            fallbackSummary: work.inputText
+                        ),
+                        template: template(for: work.templateId),
+                        canvasSizeID: work.renderParams.string(
+                            "canvas_size_id",
+                            default: template(for: work.templateId)?.defaultSizeId ?? "xhs-3-4"
+                        ),
+                        templateName: template(for: work.templateId)?.name ?? "已归档模板",
+                        status: work.exportPath == nil ? "未导出" : "已导出",
+                        statusIcon: work.exportPath == nil ? "square.and.pencil" : "checkmark.circle.fill",
+                        date: work.updatedAt,
+                        onOpen: {
+                            Task {
+                                if await viewModel.reopenWork(work) {
+                                    onOpenWork()
+                                }
+                            }
+                        },
+                        onDelete: {
+                            pendingDeletion = .work(work)
+                        }
+                    )
+                }
+            }
+
+            if viewModel.hasMoreWorks {
+                Button("加载更多作品", systemImage: "arrow.down") {
+                    Task { await viewModel.loadMoreWorks() }
+                }
+                .buttonStyle(.bordered)
+                .tint(Color.cardifyNavActive)
+                .frame(maxWidth: .infinity)
+                .disabled(viewModel.isLoadingWorks)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var draftsSection: some View {
+        WorkLibrarySectionHeader(
+            title: "本机草稿",
+            detail: "\(filteredDrafts.count) 个"
+        )
+
+        if filteredDrafts.isEmpty {
+            WorkLibraryNoResults(title: "没有本机草稿", detail: "保存草稿后，可以随时回到这里继续编辑")
+        } else {
+            LazyVGrid(columns: gridColumns, spacing: 12) {
+                ForEach(filteredDrafts) { draft in
+                    WorkLibraryCard(
+                        title: CardContent(
+                            renderParams: draft.renderParams,
+                            fallbackTitle: "未命名草稿",
+                            fallbackSummary: draft.inputText
+                        ).title,
+                        content: draftContent(draft),
+                        template: template(for: draft.templateId),
+                        canvasSizeID: draft.renderParams.string(
+                            "canvas_size_id",
+                            default: template(for: draft.templateId)?.defaultSizeId ?? "xhs-3-4"
+                        ),
+                        templateName: template(for: draft.templateId)?.name ?? "已归档模板",
+                        status: "本机草稿",
+                        statusIcon: "internaldrive",
+                        date: draft.updatedAt,
+                        onOpen: {
+                            if viewModel.reopenLocalDraft(draft) {
+                                onOpenWork()
+                            }
+                        },
+                        onDelete: {
+                            pendingDeletion = .draft(draft)
+                        }
+                    )
+                }
+            }
+
+            if viewModel.currentUser != nil {
+                Button("同步本机草稿", systemImage: "arrow.triangle.2.circlepath") {
+                    Task { await viewModel.syncLocalDraftsNow() }
+                }
+                .buttonStyle(.bordered)
+                .tint(Color.cardifyNavActive)
+                .disabled(viewModel.isSaving)
+            }
+        }
+    }
+
+    private var filteredDrafts: [LocalDraftRecord] {
+        viewModel.localDrafts.filter { draft in
+            let content = CardContent(
+                renderParams: draft.renderParams,
+                fallbackTitle: "未命名草稿",
+                fallbackSummary: draft.inputText
+            )
+            let matchesSearch = searchText.isEmpty
+                || content.title.localizedCaseInsensitiveContains(searchText)
+                || draft.inputText.localizedCaseInsensitiveContains(searchText)
+            let matchesTemplate = templateFilterID == nil || draft.templateId == templateFilterID
+            return matchesSearch && matchesTemplate
+        }
+    }
+
+    private var showsWorks: Bool {
+        scope == .all || scope == .works
+    }
+
+    private var showsDrafts: Bool {
+        scope == .all || scope == .drafts
+    }
+
+    private var isCompletelyEmpty: Bool {
+        scope == .all
+            && !viewModel.isLoadingWorks
+            && filteredDrafts.isEmpty
+            && (viewModel.currentUser == nil || viewModel.works.isEmpty)
+    }
+
+    private func template(for id: String) -> TemplateSummary? {
+        viewModel.templates.first(where: { $0.id == id })
+    }
+
+    private func draftContent(_ draft: LocalDraftRecord) -> CardContent {
+        var content = CardContent(
+            renderParams: draft.renderParams,
+            fallbackTitle: "未命名草稿",
+            fallbackSummary: draft.inputText
+        )
+        content.coverImageData = draft.coverImageData
+        content.avatarImageData = draft.avatarImageData
+        return content
+    }
+
+    private func reloadWorks() async {
+        await viewModel.loadWorks(
+            query: searchText,
+            templateId: templateFilterID,
+            exported: exportFilter.apiValue
+        )
+    }
+
+    private func deletePendingItem() {
+        guard let pendingDeletion else { return }
+        self.pendingDeletion = nil
+        switch pendingDeletion {
+        case .work(let work):
+            Task { await viewModel.deleteWork(work) }
+        case .draft(let draft):
+            viewModel.deleteLocalDraft(draft)
+        }
+    }
+}
+
+private enum WorkLibraryScope: String, CaseIterable, Identifiable {
+    case all
+    case works
+    case drafts
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .all: return "全部"
+        case .works: return "作品"
+        case .drafts: return "草稿"
+        }
+    }
+
+    static func available(isSignedIn: Bool) -> [WorkLibraryScope] {
+        isSignedIn ? allCases : [.all, .drafts]
+    }
+}
+
+private enum WorkExportFilter: String, CaseIterable, Identifiable {
+    case all
+    case exported
+    case pending
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .all: return "全部状态"
+        case .exported: return "已导出"
+        case .pending: return "未导出"
+        }
+    }
+
+    var apiValue: Bool? {
+        switch self {
+        case .all: return nil
+        case .exported: return true
+        case .pending: return false
+        }
+    }
+}
+
+private enum PendingLibraryDeletion {
+    case work(WorkRecord)
+    case draft(LocalDraftRecord)
+
+    var message: String {
+        switch self {
+        case .work: return "作品和已保存的图片将从当前账户移除，无法恢复。"
+        case .draft: return "本机草稿将从这台设备移除，无法恢复。"
+        }
+    }
+}
+
+private struct WorkLibrarySummary: View {
+    let workCount: Int
+    let draftCount: Int
+    let isSignedIn: Bool
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 14) {
+            Image(systemName: "rectangle.stack.fill")
+                .font(.title2)
+                .foregroundStyle(Color.cardifyNavActive)
+                .frame(width: 42, height: 42)
+                .background(Color.cardifyPaper, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(isSignedIn ? "\(workCount) 个云端作品" : "本机创作档案")
+                    .font(.headline)
+                    .foregroundStyle(Color.cardifyInk)
+                Text("\(draftCount) 个本机草稿 · 最近编辑优先")
+                    .font(.caption)
+                    .foregroundStyle(Color.cardifyMuted)
+            }
+            Spacer(minLength: 8)
+        }
+        .padding(14)
+        .background(Color.cardifyMint)
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+}
+
+private struct WorkLibraryFilters: View {
+    let templates: [TemplateSummary]
+    @Binding var selectedTemplateID: String?
+    @Binding var exportFilter: WorkExportFilter
+    let showsExportFilter: Bool
+
+    private var selectedTemplateName: String {
+        templates.first(where: { $0.id == selectedTemplateID })?.name ?? "全部模板"
+    }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Menu {
+                Button("全部模板") { selectedTemplateID = nil }
+                Divider()
+                ForEach(templates) { template in
+                    Button(template.name) { selectedTemplateID = template.id }
+                }
+            } label: {
+                Label(selectedTemplateName, systemImage: "square.grid.2x2")
+                    .font(.subheadline)
+                    .foregroundStyle(Color.cardifyInk)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 0)
+
+            if showsExportFilter {
+                Menu {
+                    ForEach(WorkExportFilter.allCases) { filter in
+                        Button(filter.title) { exportFilter = filter }
+                    }
+                } label: {
+                    Label(exportFilter.title, systemImage: "arrow.down.doc")
+                        .font(.subheadline)
+                        .foregroundStyle(Color.cardifyInk)
+                        .lineLimit(1)
+                }
+            }
+        }
+        .padding(.vertical, 2)
+    }
+}
+
+private struct WorkLibrarySectionHeader: View {
+    let title: String
+    let detail: String
+
+    var body: some View {
+        HStack {
+            Text(title)
+                .font(.headline)
+                .foregroundStyle(Color.cardifyInk)
+            Spacer()
+            Text(detail)
+                .font(.caption)
+                .foregroundStyle(Color.cardifyMuted)
+        }
+        .padding(.top, 2)
+    }
+}
+
+private struct WorkLibraryCard: View {
+    let title: String
+    let content: CardContent
+    let template: TemplateSummary?
+    let canvasSizeID: String
+    let templateName: String
+    let status: String
+    let statusIcon: String
+    let date: Date
+    let onOpen: () -> Void
+    let onDelete: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            ZStack(alignment: .topTrailing) {
+                preview
+
+                Menu {
+                    Button("打开编辑", systemImage: "pencil", action: onOpen)
+                    Button("删除", systemImage: "trash", role: .destructive, action: onDelete)
+                } label: {
+                    Image(systemName: "ellipsis.circle.fill")
+                        .font(.title3)
+                        .foregroundStyle(Color.cardifyInk.opacity(0.72))
+                        .padding(8)
+                }
+                .accessibilityLabel("作品操作")
+            }
+
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Color.cardifyInk)
+                .lineLimit(2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            Text(templateName)
+                .font(.caption)
+                .foregroundStyle(Color.cardifyMuted)
+                .lineLimit(1)
+
+            HStack(spacing: 6) {
+                Label(status, systemImage: statusIcon)
+                    .font(.caption2)
+                    .foregroundStyle(status == "已导出" ? Color.cardifyNavActive : Color.cardifyMuted)
+                Spacer(minLength: 4)
+                Text(date.formatted(date: .abbreviated, time: .omitted))
+                    .font(.caption2)
+                    .foregroundStyle(Color.cardifyMuted)
+            }
+        }
+        .padding(8)
+        .background(Color.cardifyPaper, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(Color.cardifyMint, lineWidth: 1)
+        )
+        .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .onTapGesture(perform: onOpen)
+        .accessibilityElement(children: .contain)
+        .accessibilityHint("点按打开编辑")
+    }
+
+    @ViewBuilder
+    private var preview: some View {
+        if let template {
+            TemplateCanvasView(template: template.schema, content: content, canvasSizeId: canvasSizeID)
+                .frame(maxWidth: .infinity)
+                .frame(height: 172)
+                .background(Color.cardifySky, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        } else {
+            VStack(spacing: 8) {
+                Image(systemName: "rectangle.slash")
+                    .font(.title3)
+                Text("模板已归档")
+                    .font(.caption)
+            }
+            .foregroundStyle(Color.cardifyMuted)
+            .frame(maxWidth: .infinity, minHeight: 172)
+            .background(Color.cardifySky, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+        }
+    }
+}
+
+private struct WorkLibraryNoResults: View {
+    let title: String
+    let detail: String
+
+    var body: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .font(.title3)
+                .foregroundStyle(Color.cardifyNavInactive)
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Color.cardifyInk)
+            Text(detail)
+                .font(.caption)
+                .foregroundStyle(Color.cardifyMuted)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity, minHeight: 132)
+        .padding(12)
+    }
+}
+
+private struct WorkLibrarySignInPrompt: View {
+    let action: () -> Void
+
+    var body: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "person.crop.circle.badge.checkmark")
+                .font(.title2)
+                .foregroundStyle(Color.cardifyNavActive)
+            Text("登录后查看云端作品")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Color.cardifyInk)
+            Button("通过 Apple 登录", action: action)
+                .buttonStyle(.bordered)
+                .tint(Color.cardifyNavActive)
+        }
+        .frame(maxWidth: .infinity, minHeight: 150)
+    }
+}
+
+private struct WorkLibraryEmptyState: View {
+    let isSignedIn: Bool
+    let signInAction: () -> Void
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "rectangle.stack.badge.plus")
+                .font(.system(size: 34, weight: .medium))
+                .foregroundStyle(Color.cardifyNavInactive)
+            Text("还没有创作内容")
+                .font(.headline)
+                .foregroundStyle(Color.cardifyInk)
+            Text(isSignedIn ? "完成并保存一张魔卡后，它会出现在这里。" : "保存草稿后，可在这里继续编辑；登录后还能同步到其他设备。")
+                .font(.subheadline)
+                .foregroundStyle(Color.cardifyMuted)
+                .multilineTextAlignment(.center)
+            if !isSignedIn {
+                Button("通过 Apple 登录", action: signInAction)
+                    .buttonStyle(.bordered)
+                    .tint(Color.cardifyNavActive)
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: 240)
+        .padding(.horizontal, 24)
     }
 }
 
@@ -1487,72 +1977,6 @@ private enum AppleSignInError: LocalizedError {
 
     var errorDescription: String? {
         "没有收到 Apple 身份令牌"
-    }
-}
-
-private struct WorkRow: View {
-    let work: WorkRecord
-    let template: TemplateSummary?
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: work.exportPath == nil ? "doc.text.image" : "photo.on.rectangle.angled")
-                .font(.title3)
-                .foregroundStyle(work.exportPath == nil ? Color.cardifyMuted : Color.cardifyInk)
-                .frame(width: 30, height: 30)
-                .background(Color.cardifyMint, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(work.title)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(Color.cardifyInk)
-                    .lineLimit(2)
-                Text(template?.name ?? work.templateId)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            Spacer()
-            Image(systemName: "chevron.right")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.tertiary)
-        }
-        .padding(.vertical, 4)
-    }
-}
-
-private struct LocalDraftRow: View {
-    let draft: LocalDraftRecord
-    let template: TemplateSummary?
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "doc.text")
-                .font(.title3)
-                .foregroundStyle(Color.cardifyMuted)
-                .frame(width: 30, height: 30)
-                .background(Color.cardifySky, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(CardContent(
-                    renderParams: draft.renderParams,
-                    fallbackTitle: "未命名草稿",
-                    fallbackSummary: draft.inputText
-                ).title)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(Color.cardifyInk)
-                .lineLimit(2)
-                Text(template?.name ?? "已保存草稿")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            Spacer()
-            Image(systemName: "chevron.right")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.tertiary)
-        }
-        .padding(.vertical, 4)
     }
 }
 
