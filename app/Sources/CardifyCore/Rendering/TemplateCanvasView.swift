@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 
 #if canImport(UIKit)
@@ -133,6 +134,7 @@ public struct TemplateCanvasView: View {
             .foregroundStyle(textColor(for: layer))
             .lineLimit(layer.maxLines)
             .minimumScaleFactor(0.72)
+            .lineSpacing(max(0, (layer.style.double("line_height", default: 1.22) - 1) * size))
             .multilineTextAlignment(textAlignment(for: layer))
     }
 
@@ -147,7 +149,7 @@ public struct TemplateCanvasView: View {
 
     private func frameAlignment(for layer: TemplateLayer) -> Alignment {
         switch layer.style.string("alignment", default: "leading") {
-        case "center": return .top
+        case "center": return .center
         case "trailing": return .topTrailing
         default: return .topLeading
         }
@@ -360,6 +362,149 @@ private struct TemplatePattern: View {
     var body: some View {
         Canvas { context, size in
             switch kind {
+            case "blueprint":
+                drawGrid(context: context, size: size, lineColor: color.opacity(opacity), spacing: spacing)
+                var y = spacing
+                while y < size.height {
+                    var x = spacing
+                    while x < size.width {
+                        let arm = max(2, spacing * 0.07)
+                        var mark = Path()
+                        mark.move(to: CGPoint(x: x - arm, y: y))
+                        mark.addLine(to: CGPoint(x: x + arm, y: y))
+                        mark.move(to: CGPoint(x: x, y: y - arm))
+                        mark.addLine(to: CGPoint(x: x, y: y + arm))
+                        context.stroke(mark, with: .color(color.opacity(opacity * 1.35)), lineWidth: 1)
+                        x += spacing * 2
+                    }
+                    y += spacing * 2
+                }
+            case "confetti":
+                var row: CGFloat = 0
+                while row < size.height + spacing {
+                    var column: CGFloat = 0
+                    while column < size.width + spacing {
+                        let offset = Int(row / spacing).isMultiple(of: 2) ? spacing * 0.22 : spacing * 0.58
+                        let x = column + offset
+                        let y = row + spacing * 0.35
+                        var slash = Path()
+                        slash.move(to: CGPoint(x: x - spacing * 0.09, y: y + spacing * 0.08))
+                        slash.addLine(to: CGPoint(x: x + spacing * 0.1, y: y - spacing * 0.1))
+                        context.stroke(slash, with: .color(color.opacity(opacity)), lineWidth: max(1, spacing * 0.035))
+                        let dot = CGRect(x: x + spacing * 0.2, y: y - spacing * 0.12, width: max(2, spacing * 0.08), height: max(2, spacing * 0.08))
+                        context.fill(Path(ellipseIn: dot), with: .color(color.opacity(opacity * 1.15)))
+                        column += spacing
+                    }
+                    row += spacing
+                }
+            case "playful":
+                var y = spacing * 0.4
+                while y < size.height {
+                    var x = spacing * 0.4
+                    while x < size.width {
+                        let tile = CGRect(x: x, y: y, width: spacing * 0.34, height: spacing * 0.22)
+                        context.fill(
+                            Path(roundedRect: tile, cornerRadius: spacing * 0.09),
+                            with: .color(color.opacity(opacity * 0.75))
+                        )
+                        let center = CGPoint(x: x + spacing * 0.52, y: y + spacing * 0.12)
+                        let arm = spacing * 0.09
+                        var plus = Path()
+                        plus.move(to: CGPoint(x: center.x - arm, y: center.y))
+                        plus.addLine(to: CGPoint(x: center.x + arm, y: center.y))
+                        plus.move(to: CGPoint(x: center.x, y: center.y - arm))
+                        plus.addLine(to: CGPoint(x: center.x, y: center.y + arm))
+                        context.stroke(plus, with: .color(color.opacity(opacity)), lineWidth: max(1, spacing * 0.025))
+                        x += spacing
+                    }
+                    y += spacing
+                }
+            case "rays":
+                let origin = CGPoint(x: size.width * 0.92, y: size.height * 0.12)
+                let length = hypot(size.width, size.height) * 1.3
+                var angle = -Double.pi * 0.95
+                while angle < Double.pi * 0.7 {
+                    let start = CGPoint(
+                        x: origin.x + CGFloat(cos(angle - 0.03)) * length,
+                        y: origin.y + CGFloat(sin(angle - 0.03)) * length
+                    )
+                    let end = CGPoint(
+                        x: origin.x + CGFloat(cos(angle + 0.03)) * length,
+                        y: origin.y + CGFloat(sin(angle + 0.03)) * length
+                    )
+                    var ray = Path()
+                    ray.move(to: origin)
+                    ray.addLine(to: start)
+                    ray.addLine(to: end)
+                    ray.closeSubpath()
+                    context.fill(ray, with: .color(color.opacity(opacity * 0.55)))
+                    angle += 0.2
+                }
+            case "scanlines":
+                var y: CGFloat = 0
+                while y < size.height {
+                    var line = Path()
+                    line.move(to: CGPoint(x: 0, y: y))
+                    line.addLine(to: CGPoint(x: size.width, y: y))
+                    context.stroke(line, with: .color(color.opacity(opacity)), lineWidth: 1)
+                    y += max(4, spacing * 0.18)
+                }
+                var x = spacing * 0.5
+                while x < size.width {
+                    let marker = CGRect(x: x, y: spacing * 0.36, width: spacing * 0.3, height: max(2, spacing * 0.06))
+                    context.fill(Path(roundedRect: marker, cornerRadius: 2), with: .color(color.opacity(opacity * 1.25)))
+                    x += spacing * 1.55
+                }
+            case "contours":
+                var baseline = -spacing * 0.2
+                while baseline < size.height + spacing {
+                    var line = Path()
+                    line.move(to: CGPoint(x: -spacing, y: baseline))
+                    var x = -spacing
+                    while x < size.width + spacing {
+                        let nextX = x + spacing * 0.5
+                        let controlY = baseline + (Int((x + baseline) / spacing).isMultiple(of: 2) ? -spacing * 0.24 : spacing * 0.24)
+                        line.addQuadCurve(to: CGPoint(x: nextX, y: baseline), control: CGPoint(x: x + spacing * 0.25, y: controlY))
+                        x = nextX
+                    }
+                    context.stroke(line, with: .color(color.opacity(opacity)), lineWidth: 1)
+                    baseline += spacing * 0.52
+                }
+            case "checker":
+                let cell = max(10, spacing * 0.48)
+                var row = 0
+                var y: CGFloat = 0
+                while y < size.height {
+                    var column = 0
+                    var x: CGFloat = 0
+                    while x < size.width {
+                        if (row + column).isMultiple(of: 2) {
+                            context.fill(Path(CGRect(x: x, y: y, width: cell, height: cell)), with: .color(color.opacity(opacity * 0.78)))
+                        }
+                        column += 1
+                        x += cell
+                    }
+                    row += 1
+                    y += cell
+                }
+            case "waves":
+                var baseline = spacing * 0.3
+                while baseline < size.height {
+                    var line = Path()
+                    line.move(to: CGPoint(x: 0, y: baseline))
+                    var x: CGFloat = 0
+                    while x < size.width {
+                        let nextX = x + spacing
+                        line.addCurve(
+                            to: CGPoint(x: nextX, y: baseline),
+                            control1: CGPoint(x: x + spacing * 0.25, y: baseline - spacing * 0.18),
+                            control2: CGPoint(x: x + spacing * 0.75, y: baseline + spacing * 0.18)
+                        )
+                        x = nextX
+                    }
+                    context.stroke(line, with: .color(color.opacity(opacity)), lineWidth: max(1, spacing * 0.022))
+                    baseline += spacing * 0.64
+                }
             case "dots":
                 var y: CGFloat = spacing / 2
                 while y < size.height {
@@ -381,25 +526,29 @@ private struct TemplatePattern: View {
                     x += spacing
                 }
             default:
-                var x: CGFloat = spacing
-                while x < size.width {
-                    var line = Path()
-                    line.move(to: CGPoint(x: x, y: 0))
-                    line.addLine(to: CGPoint(x: x, y: size.height))
-                    context.stroke(line, with: .color(color.opacity(opacity)), lineWidth: 1)
-                    x += spacing
-                }
-                var y: CGFloat = spacing
-                while y < size.height {
-                    var line = Path()
-                    line.move(to: CGPoint(x: 0, y: y))
-                    line.addLine(to: CGPoint(x: size.width, y: y))
-                    context.stroke(line, with: .color(color.opacity(opacity)), lineWidth: 1)
-                    y += spacing
-                }
+                drawGrid(context: context, size: size, lineColor: color.opacity(opacity), spacing: spacing)
             }
         }
         .accessibilityHidden(true)
+    }
+
+    private func drawGrid(context: GraphicsContext, size: CGSize, lineColor: Color, spacing: CGFloat) {
+        var x: CGFloat = spacing
+        while x < size.width {
+            var line = Path()
+            line.move(to: CGPoint(x: x, y: 0))
+            line.addLine(to: CGPoint(x: x, y: size.height))
+            context.stroke(line, with: .color(lineColor), lineWidth: 1)
+            x += spacing
+        }
+        var y: CGFloat = spacing
+        while y < size.height {
+            var line = Path()
+            line.move(to: CGPoint(x: 0, y: y))
+            line.addLine(to: CGPoint(x: size.width, y: y))
+            context.stroke(line, with: .color(lineColor), lineWidth: 1)
+            y += spacing
+        }
     }
 }
 

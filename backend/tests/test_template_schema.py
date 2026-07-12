@@ -66,3 +66,25 @@ def test_text_layers_have_safe_capacity_across_all_sizes():
                     layer.id,
                     canvas_size.id,
                 )
+
+
+def test_quote_poster_uses_a_single_primary_message():
+    quote_poster = next(template for template in SEED_TEMPLATES if template["id"] == "quote-poster")
+    document = TemplateDocumentSchema.model_validate(quote_poster["schema"])
+
+    content_roles = {"title", "summary", "author_name"}
+    assert [layer.role for layer in document.layers if layer.role in content_roles] == ["title"]
+
+    wash = next(layer for layer in document.layers if layer.id == "quote-wash")
+    assert wash.style["pattern"] == "rays"
+
+
+def test_each_category_declares_a_distinct_background_pattern():
+    category_patterns = {}
+    for template in SEED_TEMPLATES:
+        document = TemplateDocumentSchema.model_validate(template["schema"])
+        pattern = next(layer for layer in document.layers if layer.role == "decorative_pattern")
+        category_patterns[template["category"]] = pattern.style["pattern"]
+
+    assert set(category_patterns) == EXPECTED_CATEGORIES
+    assert len(set(category_patterns.values())) == len(EXPECTED_CATEGORIES)
