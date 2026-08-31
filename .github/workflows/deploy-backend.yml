@@ -1,10 +1,6 @@
 name: Deploy Cardify Backend
 
 on:
-  push:
-    branches: [main]
-  schedule:
-    - cron: '2/5 * * * *'
   workflow_dispatch:
     inputs:
       force_deploy:
