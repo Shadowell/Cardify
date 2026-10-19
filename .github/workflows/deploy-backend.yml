@@ -1,6 +1,8 @@
 name: Deploy Cardify Backend
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
       force_deploy:
@@ -8,10 +10,18 @@ on:
         required: false
         default: false
         type: boolean
+      engine:
+        description: 发布执行位置
+        type: choice
+        options: [server, github]
+        default: server
 
 concurrency:
   group: cardify-production-deploy
   cancel-in-progress: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
+
+env:
+  DEPLOY_ENGINE: ${{ (github.event_name == 'workflow_dispatch' && inputs.engine) || vars.DEPLOY_ENGINE || 'server' }}
 
 permissions:
   contents: read
@@ -35,9 +45,10 @@ jobs:
         working-directory: backend
         run: pytest -q
 
-  deploy:
+  deploy-server:
+    name: 东京自托管发布
     needs: test
-    if: ${{ needs.test.result == 'success' && vars.CARDIFY_DEPLOY_ENABLED == 'true' && github.ref == 'refs/heads/main' }}
+    if: ${{ needs.test.result == 'success' && github.ref == 'refs/heads/main' && ((github.event_name == 'workflow_dispatch' && inputs.engine) || vars.DEPLOY_ENGINE || 'server') == 'server' }}
     runs-on: [self-hosted, cardify-production]
     environment: production
     steps:
@@ -61,3 +72,37 @@ jobs:
       - name: Deploy backend
         if: steps.deployment-gate.outputs.should_deploy == 'true'
         run: sudo /usr/local/sbin/cardify-deploy "${GITHUB_WORKSPACE}" "${GITHUB_SHA}"
+
+  deploy-github:
+    name: GitHub 托管触发发布
+    needs: test
+    if: ${{ needs.test.result == 'success' && github.ref == 'refs/heads/main' && ((github.event_name == 'workflow_dispatch' && inputs.engine) || vars.DEPLOY_ENGINE || 'server') == 'github' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Configure hosted deploy SSH
+        env:
+          SSH_KEY: ${{ secrets.CARDIFY_HOSTED_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.CARDIFY_HOSTED_KNOWN_HOSTS }}
+          HOST: ${{ secrets.CARDIFY_HOSTED_HOST }}
+        run: |
+          set -euo pipefail
+          test -n "$SSH_KEY" && test -n "$KNOWN_HOSTS" && test -n "$HOST"
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/cardify_hosted
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/cardify_known_hosts
+          chmod 600 ~/.ssh/cardify_hosted ~/.ssh/cardify_known_hosts
+      - name: Trigger trusted deploy
+        env:
+          HOST: ${{ secrets.CARDIFY_HOSTED_HOST }}
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/cardify_hosted \
+            -o IdentitiesOnly=yes -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile=~/.ssh/cardify_known_hosts \
+            -o ServerAliveInterval=30 -o ServerAliveCountMax=60 \
+            "root@${HOST}" "$GITHUB_SHA"
+      - name: Verify public health
+        run: |
+          set -euo pipefail
+          curl -fsS --max-time 10 https://cardify.notenap.com/health >/dev/null
